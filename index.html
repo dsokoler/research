@@ -1,0 +1,1360 @@
+<title>WESP Internals</title>
+<style>
+:root{
+  --paper:#f5f4ef; --surface:#ffffff; --ink:#1c211f; --ink-muted:#5c665f;
+  --line:#dadfd6; --line-strong:#b9c2b7;
+  --accent:#3f7a68; --accent-strong:#2c5b4c; --accent-soft:#e4efe9;
+  --tag-ok-bg:#e4efe9; --tag-ok-fg:#2c5b4c;
+  --tag-inf-bg:#f6ecd9; --tag-inf-fg:#8a5a1e;
+  --tag-gap-bg:#f5e2dd; --tag-gap-fg:#9c4636;
+  --shadow:rgba(28,33,31,0.10);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#111513; --surface:#171c19; --ink:#e6ece7; --ink-muted:#96a39b;
+    --line:#2a322c; --line-strong:#3a453d;
+    --accent:#5fae91; --accent-strong:#86c9ae; --accent-soft:#1c2b25;
+    --tag-ok-bg:#1c2b25; --tag-ok-fg:#86c9ae;
+    --tag-inf-bg:#2e2717; --tag-inf-fg:#e0b56d;
+    --tag-gap-bg:#2c1e1a; --tag-gap-fg:#e28d7a;
+    --shadow:rgba(0,0,0,0.45);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111513; --surface:#171c19; --ink:#e6ece7; --ink-muted:#96a39b;
+  --line:#2a322c; --line-strong:#3a453d;
+  --accent:#5fae91; --accent-strong:#86c9ae; --accent-soft:#1c2b25;
+  --tag-ok-bg:#1c2b25; --tag-ok-fg:#86c9ae;
+  --tag-inf-bg:#2e2717; --tag-inf-fg:#e0b56d;
+  --tag-gap-bg:#2c1e1a; --tag-gap-fg:#e28d7a;
+  --shadow:rgba(0,0,0,0.45);
+}
+
+* { box-sizing:border-box; }
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:'Source Sans 3',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.65;
+  padding-inline:20px; padding-block:0 64px;
+}
+.page{ max-width:860px; margin-inline:auto; }
+
+h1,h2,h3,h4{ font-family:'Newsreader',Georgia,serif; text-wrap:balance; color:var(--ink); }
+p{ max-width:68ch; }
+a{ color:var(--accent-strong); text-decoration-thickness:1px; text-underline-offset:2px; }
+a:focus-visible, summary:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+code, kbd, .mono{ font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; }
+.tabular{ font-variant-numeric:tabular-nums; }
+
+.cover{ padding-block:56px 40px; border-bottom:1px solid var(--line); }
+.eyebrow{
+  font-family:'JetBrains Mono',monospace; font-size:.72rem; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--accent-strong); margin:0 0 14px;
+}
+.cover h1{ font-size:2.5rem; font-weight:600; line-height:1.08; margin:0 0 10px; }
+.cover .dek{ color:var(--ink-muted); font-size:1.08rem; max-width:58ch; margin:0 0 28px; }
+.cover-meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; font-size:.85rem; color:var(--ink-muted);
+  border-top:1px solid var(--line); padding-top:18px;
+}
+.cover-meta div{ display:flex; flex-direction:column; gap:2px; }
+.cover-meta b{ color:var(--ink); font-weight:600; }
+.cover-meta span{ font-family:'JetBrains Mono',monospace; font-size:.72rem; }
+
+.toc{ padding-block:28px; }
+.toc h2{ font-size:1rem; text-transform:uppercase; letter-spacing:.08em; font-family:'Source Sans 3',sans-serif; font-weight:700; color:var(--ink-muted); margin:0 0 12px; }
+.toc ol{ list-style:none; margin:0; padding:0; columns:2; column-gap:32px; }
+.toc li{ break-inside:avoid; margin-bottom:6px; font-size:.92rem; }
+.toc a{ color:var(--ink); text-decoration:none; display:flex; gap:8px; }
+.toc a:hover{ color:var(--accent-strong); }
+.toc .n{ color:var(--accent); font-family:'JetBrains Mono',monospace; font-size:.82rem; min-width:1.6em; }
+
+section{ padding-block:38px; border-bottom:1px solid var(--line); }
+section:last-of-type{ border-bottom:none; }
+.sec-head{ display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
+.sec-num{ font-family:'JetBrains Mono',monospace; color:var(--accent); font-size:1rem; }
+h2{ font-size:1.55rem; font-weight:600; margin:0; }
+h3{ font-size:1.12rem; font-weight:600; margin:28px 0 10px; }
+h4{ font-size:1rem; font-weight:600; margin:24px 0 8px; }
+.lede{ color:var(--ink-muted); font-size:1.02rem; margin-top:2px; }
+
+.chip{
+  display:inline-flex; align-items:center; gap:5px; font-family:'JetBrains Mono',monospace;
+  font-size:.68rem; letter-spacing:.03em; text-transform:uppercase; font-weight:600;
+  padding:2px 7px; border-radius:99px; white-space:nowrap; vertical-align:middle;
+}
+.chip.ok{ background:var(--tag-ok-bg); color:var(--tag-ok-fg); }
+.chip.inf{ background:var(--tag-inf-bg); color:var(--tag-inf-fg); }
+.chip.gap{ background:var(--tag-gap-bg); color:var(--tag-gap-fg); }
+.legend{ display:flex; flex-wrap:wrap; gap:16px; font-size:.85rem; color:var(--ink-muted); margin:14px 0 24px; align-items:center; }
+.legend span{ display:inline-flex; align-items:center; gap:6px; }
+
+.twrap{ overflow-x:auto; margin:18px 0; border:1px solid var(--line); border-radius:8px; }
+table{ border-collapse:collapse; width:100%; font-size:.88rem; min-width:520px; }
+th,td{ padding:9px 12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+thead th{
+  font-family:'JetBrains Mono',monospace; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--ink-muted); background:var(--surface); position:sticky; top:0;
+}
+tbody tr:nth-child(even){ background:color-mix(in srgb, var(--surface) 60%, var(--paper)); }
+tbody tr:last-child td{ border-bottom:none; }
+td.mono, th.mono{ font-family:'JetBrains Mono',monospace; font-size:.82rem; }
+.twrap.appendix table{ min-width:640px; }
+
+pre{
+  background:var(--surface); border:1px solid var(--line); border-radius:8px;
+  padding:16px 18px; overflow-x:auto; font-size:.82rem; line-height:1.6;
+}
+pre code{ font-family:'JetBrains Mono',monospace; color:var(--ink); }
+.cm{ color:var(--ink-muted); font-style:italic; }
+.kw{ color:var(--accent-strong); font-weight:600; }
+.str{ color:var(--tag-inf-fg); }
+
+.tree{ background:var(--accent-soft); border:1px solid var(--line); border-radius:8px; padding:18px 20px; }
+.tree pre{ background:none; border:none; padding:0; margin:0; }
+
+.callout{
+  border-left:3px solid var(--accent); background:var(--accent-soft); border-radius:0 8px 8px 0;
+  padding:14px 18px; margin:18px 0; font-size:.94rem;
+}
+.callout b{ color:var(--accent-strong); }
+ul.tight li, ol.tight li{ margin-bottom:6px; }
+
+details{ border:1px solid var(--line); border-radius:8px; padding:14px 18px; margin:18px 0; }
+summary{ cursor:pointer; font-weight:600; font-family:'JetBrains Mono',monospace; font-size:.82rem; letter-spacing:.02em; }
+summary::marker{ color:var(--accent); }
+details[open] summary{ margin-bottom:14px; }
+
+footer{ padding-block:32px 8px; color:var(--ink-muted); font-size:.82rem; }
+footer .mono{ font-size:.78rem; }
+
+@media (max-width:640px){
+  .cover h1{ font-size:1.85rem; }
+  .toc ol{ columns:1; }
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,500&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<div class="page">
+  <div class="cover">
+    <p class="eyebrow">Static analysis report</p>
+    <h1>WESP Internals</h1>
+    <p class="dek">How the Windows Endpoint Security Platform driver hooks the system, what its filter and rule engine can express, and what a user-mode security client can do with it.</p>
+    <div class="cover-meta">
+      <div><b>wesp.sys</b><span>MD5 79d7531f91dbc853264d4260a58077f6</span></div>
+      <div><b>espclient.dll</b><span>MD5 8bcdb5a701e6314eb84ed445d6daf698</span></div>
+      <div><b>Version</b><span>0.1.0.154553750+3639f00d</span></div>
+      <div><b>Analysis</b><span>Ghidra 12.1.2, PDB-resolved, static only</span></div>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#overview"><span class="n">01</span>Overview</a></li>
+      <li><a href="#subject"><span class="n">02</span>What you're looking at</a></li>
+      <li><a href="#architecture"><span class="n">03</span>How the driver hooks the system</a></li>
+      <li><a href="#lifecycle"><span class="n">04</span>How a client receives events</a></li>
+      <li><a href="#objects"><span class="n">05</span>The object model</a></li>
+      <li><a href="#filters"><span class="n">06</span>The filter and rule engine</a></li>
+      <li><a href="#collections"><span class="n">07</span>Collections</a></li>
+      <li><a href="#wire"><span class="n">08</span>The wire protocol</a></li>
+      <li><a href="#example"><span class="n">09</span>Build a rule</a></li>
+      <li><a href="#security"><span class="n">10</span>Security considerations</a></li>
+      <li><a href="#implications"><span class="n">11</span>What this means for vendors</a></li>
+      <li><a href="#driver-gap"><span class="n">12</span>What you still need a driver for</a></li>
+      <li><a href="#attacks"><span class="n">13</span>How a WESP-based agent gets defeated</a></li>
+      <li><a href="#gaps"><span class="n">14</span>What this analysis doesn't cover</a></li>
+      <li><a href="#appendix"><span class="n">15</span>Reference: functions and addresses</a></li>
+      <li><a href="#credits"><span class="n">16</span>Credits and corroboration</a></li>
+    </ol>
+  </nav>
+
+  <div class="legend">
+    <span>Confidence markers used throughout:</span>
+    <span class="chip ok">confirmed</span> read directly from code or manifest
+    <span class="chip inf">inferred</span> reasoned from evidence
+    <span class="chip gap">not recovered</span> unavailable from these files
+  </div>
+
+  <section id="overview">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Overview</h2></div>
+    <p class="lede">WESP is a single Microsoft-signed kernel driver that centralizes the security callbacks an antivirus or EDR vendor would otherwise implement in its own driver, then exposes them to user-mode clients through a rule-filtered event subscription API.</p>
+    <p>The driver, <code>wesp.sys</code>, registers as a file system minifilter and hooks process, thread, image-load, object-handle, and registry callbacks. It funnels everything through one named communication port. The client library, <code>espclient.dll</code>, lets a user-mode process register itself, declare filter rules, and receive only the events those rules match.</p>
+    <p>Three characteristics shape everything else in this report:</p>
+    <ul class="tight">
+      <li><b>Rules are evaluated in the kernel.</b> A client declares boolean expressions over typed kernel objects. The driver evaluates them inline, on the thread performing the operation, and queues only matches. Clients never see the firehose.</li>
+      <li><b>The driver enforces; delivery is separate.</b> File pre-operation callbacks return a deny status selected by rule processing, including <code>STATUS_VIRUS_INFECTED</code>, so operations can be blocked synchronously. Event delivery to a client is asynchronous and independent of that decision. Whether a third-party client's rules can drive a deny, or only Microsoft's policy can, is unresolved. See <a href="#lifecycle">section 4</a>.</li>
+      <li><b>Both components are largely Rust.</b> <code>wesp_lib</code> in the driver and <code>espclient_rs</code> in the client do the real work, wrapped in thin C++ shims that add telemetry and reference counting. Those shims also translate between the public ABI and the internal representation, which matters if you plan to build on this platform.</li>
+    </ul>
+  </section>
+
+  <section id="subject">
+    <div class="sec-head"><span class="sec-num">02</span><h2>What you're looking at</h2></div>
+
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Field</th><th>wesp.sys</th><th>espclient.dll</th></tr></thead>
+        <tbody>
+          <tr><td>Role</td><td>Kernel minifilter and callback driver</td><td>User-mode client library</td></tr>
+          <tr><td>PE description</td><td>Windows Endpoint Security Platform Driver</td><td>Windows Endpoint Security Platform Client Dll</td></tr>
+          <tr><td>Architecture</td><td class="mono">x86-64 PE</td><td class="mono">x86-64 PE</td></tr>
+          <tr><td>Size</td><td class="mono tabular">4,213,248 bytes</td><td class="mono tabular">1,098,024 bytes</td></tr>
+          <tr><td>Functions recovered</td><td class="mono tabular">3,588</td><td class="mono tabular">1,330</td></tr>
+          <tr><td>Compiler</td><td class="mono">rustc</td><td class="mono">rustc and MSVC</td></tr>
+          <tr><td>PDB</td><td class="mono">wesp.pdb<br>064003e5-bbed-4acf-895e-4b8537c5d4b5</td><td class="mono">espclient.pdb<br>bb190a0e-8a07-c060-fb7d-1d180efe2ffe</td></tr>
+          <tr><td>SHA-256</td><td class="mono">39c4362ae44f7491d304da97342549d01c7d9750bb90c7c7c70a471a67809ba0</td><td class="mono">6ea81fe48b9068ff893ae76ebd00f5e7e1397d422b71ba48477d64a3f5ef73f8</td></tr>
+          <tr><td>Publisher</td><td colspan="2">Microsoft Corporation. Product: Windows Endpoint Security Platform, version 0.1.0.154553750</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Build strings in <code>espclient.dll</code> (<code class="mono">C:\__w\1\s\client\{lib,dll}\*.cpp</code>) place it inside a larger client component tree. A companion Rust crate, <code>espclient_rs</code>, compiles filters and marshals the FFI boundary underneath a C++ shim built on the Windows Implementation Library.</p>
+
+    <h3>A third source: the TraceLogging manifest</h3>
+    <p>A decoded TraceLogging manifest for <code>espclient.dll</code> supplements the binaries. It's authoritative for field names and event structure, though it declares no enum value maps.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Provider name</td><td class="mono">Microsoft.Windows.WESP.Client</td></tr>
+          <tr><td>Provider GUID</td><td class="mono">ea3fdb23-a523-45db-bbc2-7b3bddf65666</td></tr>
+          <tr><td>Schema source</td><td class="mono">TraceLogging</td></tr>
+          <tr><td>Declared source binary</td><td class="mono">C:\Windows\System32\espclient.dll</td></tr>
+          <tr><td>Event count</td><td class="mono tabular">389</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Every <code>Esp*</code> API has a start event that carries its input arguments and stop or error events that carry results. If you have a build where the platform runs, this provider is the most direct way to enumerate WESP consumers and observe real argument values, including the property IDs this report can't name statically.</p>
+
+    <div class="callout">
+      <b>This is a pre-release platform.</b> The version resource on both binaries reads <code class="mono">0.1.0.154553750+3639f00d</code>. A 0.1.0 carrying a git-hash build suffix indicates an engineering build, not a shipped component. The binaries first shipped publicly in Windows Insider Preview build <b>29661</b>. Neither file appeared in <code class="mono">System32</code> on the analysis machine, and no <code class="mono">wesp</code> service was registered, so both were obtained out of band. No published SDK, documentation, or header exists for this interface; a private preview went to selected partners in 2025. Read the report accordingly: the architecture is the durable part, and the constants are a snapshot that can change between builds.
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="sec-head"><span class="sec-num">03</span><h2>How the driver hooks the system</h2></div>
+    <p>At <code>DriverEntry</code>, <code>wesp.sys</code> registers every major kernel security callback mechanism in one driver.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Mechanism</th><th>APIs</th><th>What it replaces for a vendor</th></tr></thead>
+        <tbody>
+          <tr><td>File system minifilter</td><td class="mono">FltRegisterFilter, FltStartFiltering</td><td>A vendor's own minifilter</td></tr>
+          <tr><td>File I/O callbacks</td><td class="mono">EspFs* pre and post family</td><td>Minifilter operation callbacks</td></tr>
+          <tr><td>Process lifecycle</td><td class="mono">PsSetCreateProcessNotifyRoutineEx2</td><td>Process-creation notify routine</td></tr>
+          <tr><td>Thread lifecycle</td><td class="mono">PsSetCreateThreadNotifyRoutineEx</td><td>Thread notify routine</td></tr>
+          <tr><td>Image load</td><td class="mono">PsSetLoadImageNotifyRoutineEx</td><td>Load-image notify routine</td></tr>
+          <tr><td>Handle operations</td><td class="mono">ObRegisterCallbacks</td><td>Object pre-operation callbacks</td></tr>
+          <tr><td>Registry</td><td class="mono">CmRegisterCallbackEx</td><td>Registry callbacks, transaction aware</td></tr>
+          <tr><td>Telemetry</td><td class="mono">EtwRegister, EtwWriteTransfer</td><td>A dedicated ETW provider</td></tr>
+          <tr><td>Antimalware integration</td><td class="mono">MpReportPostRead, MpReportPostWrite</td><td>Direct hook into the Defender scan path</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The event catalog <span class="chip ok">confirmed</span></h3>
+    <p>The <code>EspFs*</code> export names understate the surface. The driver defines a full named event catalog under <code>wesp_lib::event</code>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Category</th><th>Event types</th></tr></thead>
+        <tbody>
+          <tr><td>File</td><td class="mono">FileCreate, FileOpen, FileCleanup, FileRead, FileWrite, FileLock, FileUnlock, FileFsctl, FileCreateSection, FileQueryOpen, FileQueryInformation, FileQueryDirectoryInformation, FileSetInformation, FileSetSecurity, SetEa, KtmTransactionCommit, KtmTransactionRollback</td></tr>
+          <tr><td>Pipe and mailslot</td><td class="mono">PipeCreate, MailslotCreate</td></tr>
+          <tr><td>Volume</td><td class="mono">VolumeMount, VolumeDismount, VolumeFsctl</td></tr>
+          <tr><td>Process</td><td class="mono">ProcessCreate, ProcessTerminate, ProcessLoadImage</td></tr>
+          <tr><td>Thread</td><td class="mono">ThreadCreate, ThreadStart, ThreadTerminate</td></tr>
+          <tr><td>Object manager</td><td class="mono">ObHandleCreate, ObHandleDuplicate</td></tr>
+          <tr><td>Registry</td><td class="mono">RegCreateKey, RegOpenKey, RegDeleteKey, RegSetValueKey, RegDeleteValueKey, RegQueryKey, RegQueryValueKey, RegEnumKey, RegEnumValueKey, RegRenameKey, RegReplaceKey, RegLoadKey, RegSaveKey, RegRestoreKey, RegSetKeySecurity</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Each event type has its own <code class="mono">NotificationBuilder&lt;T&gt;::add_properties_query</code> and <code class="mono">PropertyQueryWriter</code> specialization, so each carries its own wire schema for property data.</p>
+    <p>The public constant names are embedded in the driver, which gives the complete <code class="mono">ESP_EVENT_TYPE</code> enumeration: 46 event types plus <code class="mono">ESP_EVENT_TYPE_NONE</code> <span class="chip ok">confirmed</span>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Group</th><th class="mono">ESP_EVENT_TYPE_&hellip;</th></tr></thead>
+        <tbody>
+          <tr><td>Thread</td><td class="mono">THREAD_CREATE, THREAD_START, THREAD_TERMINATE</td></tr>
+          <tr><td>Process</td><td class="mono">PROCESS_CREATE, PROCESS_TERMINATE, PROCESS_LOAD_IMAGE</td></tr>
+          <tr><td>File object</td><td class="mono">FO_CREATE, FO_OPEN, FO_READ, FO_WRITE, FO_CLEANUP</td></tr>
+          <tr><td>File system</td><td class="mono">FS_CREATE_FILE_SECTION, FS_QUERY_FILE_INFORMATION, FS_SET_FILE_INFORMATION, FS_SET_FILE_SECURITY, FS_QUERY_DIRECTORY_INFORMATION, FS_FSCTL_FILE, FS_SET_EA, FS_QUERY_OPEN_FILE, FS_LOCK_FILE, FS_UNLOCK_FILE</td></tr>
+          <tr><td>Transactions</td><td class="mono">KTM_TRANSACTION_COMMIT, KTM_TRANSACTION_ROLLBACK</td></tr>
+          <tr><td>Volume</td><td class="mono">VOLUME_MOUNT, VOLUME_DISMOUNT, VOLUME_FSCTL</td></tr>
+          <tr><td>Pipe and mailslot</td><td class="mono">PIPE_CREATE, MAILSLOT_CREATE</td></tr>
+          <tr><td>Registry</td><td class="mono">REG_CREATE_KEY, REG_OPEN_KEY, REG_DELETE_KEY, REG_SET_VALUE_KEY, REG_DELETE_VALUE_KEY, REG_RENAME_KEY, REG_REPLACE_KEY, REG_RESTORE_KEY, REG_SET_KEY_SECURITY, REG_QUERY_KEY, REG_QUERY_VALUE_KEY, REG_SAVE_KEY, REG_LOAD_KEY, REG_ENUM_KEY, REG_ENUM_VALUE_KEY</td></tr>
+          <tr><td>Object manager</td><td class="mono">OB_CREATE_HANDLE, OB_DUPLICATE_HANDLE</td></tr>
+          <tr><td>Boot</td><td class="mono">BOOT_LOAD_DRIVER</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two entries deserve attention. <code class="mono">BOOT_LOAD_DRIVER</code> shows the platform models boot driver loads, which is the signal an ELAM driver exists to evaluate. And the KTM transaction hooks include pre-commit and pre-rollback variants (<code class="mono">EspKtmTransactionPreCommit</code>, <code class="mono">EspKtmTransactionPreRollback</code>), so transactional file activity is observable before it lands.</p>
+
+    <h3>Object sources available to a rule</h3>
+    <p>The rule engine's source vocabulary is wider than the public <code class="mono">FilterType</code> list in <a href="#filters">section 6</a>. The driver names these sources: <code class="mono">Thread</code>, <code class="mono">Process</code>, <code class="mono">FileObject</code>, <code class="mono">FileStream</code>, <code class="mono">File</code>, <code class="mono">Volume</code>, <code class="mono">Disk</code>, <code class="mono">Pipe</code>, <code class="mono">Mailslot</code>, <code class="mono">KtmTransaction</code>, <code class="mono">Desktop</code>, <code class="mono">RegistryKey</code>, <code class="mono">RegistryKeyObject</code>, <code class="mono">Token</code>, <code class="mono">MemoryAddressBasic</code>, <code class="mono">IoOperation</code>, <code class="mono">RemoteClient</code>, <code class="mono">AccessState</code>, <code class="mono">IpAddress</code>, and <code class="mono">SecurityDescriptor</code> <span class="chip ok">confirmed</span>. Field value kinds are <code class="mono">Numeric</code>, <code class="mono">Bool</code>, <code class="mono">String</code>, <code class="mono">StringList</code>, <code class="mono">Binary</code>, <code class="mono">Sid</code>, <code class="mono">EcpList</code>, <code class="mono">EaList</code>, and <code class="mono">ByteRange</code>.</p>
+    <p><code class="mono">ProcessChainMatchKind</code> and <code class="mono">ProcessRootSource</code> also appear, confirming ancestry matching is a first-class predicate rather than something you reconstruct client-side.</p>
+
+    <h3>Where RemoteClient and IpAddress come from</h3>
+    <p>These resolve the otherwise homeless <code class="mono">IpAddressComparison</code>, and the mechanism is <b>extra create parameters</b> rather than any network stack integration <span class="chip ok">confirmed</span>.</p>
+    <p>The driver imports the full ECP API set: <code class="mono">FltGetEcpListFromCallbackData</code>, <code class="mono">FltFindExtraCreateParameter</code>, <code class="mono">FltGetNextExtraCreateParameter</code>, <code class="mono">FltIsEcpFromUserMode</code>, <code class="mono">FltAcknowledgeEcp</code>, <code class="mono">FltInsertExtraCreateParameter</code>, and the allocation helpers. <code class="mono">EspFsFilePreCreate</code> calls <code class="mono">FltGetEcpListFromCallbackData</code> on every create and, alongside it, <code class="mono">wesp_lib::event::fs::RemoteClientInfo::from_raw</code>. <code class="mono">EcpList</code> is also one of the nine field value kinds, so ECP contents are directly addressable from a rule.</p>
+    <p>When a file is opened over SMB, the server attaches an extra create parameter describing the originating client, including its network address. That's the path by which a file event carries an IP. So the capability is <b>remote-access attribution on file operations</b>: you can write a rule such as "a write to this share arriving from outside this address range." It is not connection filtering, packet inspection, or any visibility into traffic that doesn't terminate in a file operation. The distinction matters when scoping what WESP replaces, covered in <a href="#driver-gap">section 12</a>.</p>
+
+    <h3>The communication port</h3>
+    <p>One port, <code class="mono">\EspFilterPort</code>, is created with <code class="mono">FltCreateCommunicationPort</code> <span class="chip ok">confirmed</span>. It's the only entry point into the driver from user mode. The driver also imports <code class="mono">FltBuildDefaultSecurityDescriptor</code>, so the port is access-checked rather than open to any caller <span class="chip inf">inferred</span>. This analysis didn't recover the specific ACL.</p>
+    <p>Internally, <code>wesp::server</code> and <code class="mono">wesp_lib::client::manager::ClientManager</code> track each connecting subsystem as a registered client. Registrations persist to disk through <code class="mono">PersistedStore</code>, so client identity survives a reboot. Live connections are tracked per process in <code class="mono">ConnectedClientProcesses</code>, keyed by <code class="mono">KPROCESS</code>.</p>
+  </section>
+
+  <section id="lifecycle">
+    <div class="sec-head"><span class="sec-num">04</span><h2>How a client receives events</h2></div>
+    <p>Registration is separate from the live channel, and the live channel uses overlapped I/O over the filter port.</p>
+    <ol class="tight">
+      <li><b>Register.</b> <code class="mono">EspRegisterClient</code> builds a versioned message and calls <code class="mono">FilterConnectCommunicationPort(L"\\EspFilterPort", ...)</code> once, then closes the handle. The manifest names the payload fields: <b><code class="mono">ClientName</code>, <code class="mono">ClientId</code>, and <code class="mono">Altitude</code></b> <span class="chip ok">confirmed</span>. Altitude is the minifilter load-order concept, so clients are explicitly ordered against one another in the callback stack.</li>
+      <li><b>Connect.</b> <code class="mono">EspConnectEventQueueWithIocp</code> or <code class="mono">EspConnectEventQueueWithCallback</code> opens the event queue and returns a handle you bind to an I/O completion port.</li>
+      <li><b>Arm.</b> <code class="mono">EspArmEventNotification</code> posts an overlapped read through <code class="mono">Esp::PortListener::ArmIo</code>, using a 0x1010-byte buffer framed as a <code class="mono">FILTER_MESSAGE_HEADER</code> plus payload.</li>
+      <li><b>Receive.</b> Each completed I/O is one matched event, already filtered in the kernel against your active rules.</li>
+      <li><b>Complete.</b> <code class="mono">EspCompleteEventNotification</code> releases the notification's slot against your memory budget.</li>
+    </ol>
+    <p>Every exported call instruments itself through a <code>WespClientProvider</code> ETW activity, so a client's API usage is visible to anything consuming that provider.</p>
+
+    <h3>Where latency enters, and where it doesn't <span class="chip ok">confirmed</span></h3>
+    <p>Tracing <code class="mono">EspFsFilePreCreate</code> through the queue internals shows exactly where delay can occur.</p>
+    <ul class="tight">
+      <li><b>Rule matching is synchronous and inline.</b> The hook reads two flags first and returns immediately if no client subscribes to that event type. Otherwise it builds the event object and calls <code class="mono">EventDispatcher::process_rules_with_current_thread_process&lt;FileCreate&gt;</code> on the thread performing the file operation. This cost scales with active rule count, but it's in-memory evaluation with no cross-process communication.</li>
+      <li><b>Queuing doesn't block.</b> <code class="mono">AsyncStateInner::enqueue</code> inserts into the client's notification list under a push lock, checked against a running memory counter and a cap. Success and over-budget return distinct status codes. The driver never grows the queue without bound and never blocks the producing thread.</li>
+      <li><b>Delivery pushes, it doesn't poll.</b> Each queue has its own delivery worker, created with <code class="mono">PsCreateSystemThread</code>, which blocks on a <code class="mono">KEVENT</code> via <code class="mono">KeWaitForSingleObject</code> while the queue is empty. Enqueueing signals that event, the worker wakes, dequeues, and calls <code class="mono">FltSendMessage</code>, which completes your pending receive. That explains the <code class="mono">KeSetEvent</code> in the enqueue path: the producing thread hands off to the worker rather than delivering inline. There's no polling interval anywhere.</li>
+      <li><b>The gap is your own idle time.</b> If you're busy handling the previous notification and haven't re-armed, the next match waits in the queue. Past the cap, you lose events. The system doesn't stall.</li>
+    </ul>
+
+    <h3>Flow control</h3>
+    <p>The manifest names the flow-control parameters, and they describe a hysteresis loop rather than a hard cliff <span class="chip ok">confirmed</span>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Call</th><th>Parameters</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspCreateEventQueue</td><td class="mono">ClientId, QueueType, Lifetime, MaxCapacityBytes, NotificationVersion</td><td>You choose your own byte budget. <code class="mono">NotificationVersion</code> pins the payload schema you understand.</td></tr>
+          <tr><td class="mono">EspSetEventQueueStateChangeCallback</td><td class="mono">QueueId, MemoryThresholdPercent, RecoveryThresholdPercent</td><td>High and low watermarks. You get a callback when usage crosses the threshold and another when it falls back under the recovery level.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>A well-behaved client notices pressure and sheds load before reaching the cap. The over-budget path is the failure mode after those warnings go unheeded.</p>
+
+    <h3>Lifetime scopes <span class="chip ok">confirmed</span></h3>
+    <p><code class="mono">Lifetime</code> appears on <code class="mono">EspCreateEventQueue</code>, <code class="mono">EspCreateCollection</code>, <code class="mono">EspEnumerateRuleIds</code>, <code class="mono">EspEnumerateCollectionIds</code>, <code class="mono">EspEnumerateEventQueueIds</code>, and <code class="mono">EspRemoveRulesForClient</code>. Queues, collections, and rules are each created under a lifetime scope and can be enumerated by that scope. This is the API counterpart to the driver's <code class="mono">PersistedStore</code>: some state is transient to the session, and some survives.</p>
+
+    <h3>The driver can deny operations <span class="chip ok">confirmed</span></h3>
+    <p>Delivery to a client is asynchronous, but that's separate from whether the operation is allowed to proceed. The driver decides that synchronously, before it returns.</p>
+    <p><code class="mono">EspFsFilePreCreate</code> ends by selecting its return value from a five-entry table at <code class="mono">0x1803bb230</code>, indexed by a verdict byte that <code class="mono">EventDispatcher::process_rules_with_current_thread_process</code> writes into the event structure. Decoding that table gives a deny-reason table:</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Verdict</th><th class="mono">NTSTATUS</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0</td><td class="mono">0xC0000906</td><td>STATUS_VIRUS_INFECTED</td></tr>
+          <tr><td class="mono">1</td><td class="mono">0xC0000022</td><td>STATUS_ACCESS_DENIED</td></tr>
+          <tr><td class="mono">2</td><td class="mono">0xC0000225</td><td>STATUS_NOT_FOUND, which hides the file rather than refusing it</td></tr>
+          <tr><td class="mono">3</td><td class="mono">0xC0000022</td><td>STATUS_ACCESS_DENIED</td></tr>
+          <tr><td class="mono">4</td><td class="mono">0xC0000022</td><td>STATUS_ACCESS_DENIED</td></tr>
+          <tr><td class="mono">&ge;5</td><td class="mono">0</td><td>Allow. This is also the value set on the "no client subscribes" fast path.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code>STATUS_VIRUS_INFECTED</code> is the canonical status an antimalware filter returns when it blocks a file, and <code>STATUS_NOT_FOUND</code> is the classic concealment response. This is an enforcement path, not error handling.</p>
+    <div class="callout">
+      <b>An earlier reading of this report was wrong, and the error is worth naming.</b> The absence of <code class="mono">FltCompletePendedPreOperation</code> was treated as evidence that the driver can't block. That import is only required to <em>pend</em> an operation and complete it asynchronously later. Denying synchronously, by returning a completion status from the callback, needs no such import. Reasoning from the missing import to "cannot block" was an absence-of-evidence error, and the return table disproves it.
+    </div>
+    <p>What stays open is <b>who decides</b>. The verdict comes from rule processing, and rules carry a persisted <code class="mono">action</code> field, so client rules plausibly drive it. Supporting this, the rule descriptor passed to <code class="mono">EspRsCreateRule</code> contains a field the code validates as <code class="mono">&le; 4</code>, and the deny table has exactly five entries <span class="chip inf">inferred</span>. Against it, the public <code class="mono">EspCreateRule</code> signature exposes only a filter, and <code class="mono">ForceAllow</code> is described as internal. Whether a third-party client can request a deny, or only Microsoft's own policy can, is <span class="chip gap">not recovered</span> and is the most consequential unknown in this report.</p>
+  </section>
+
+  <section id="objects">
+    <div class="sec-head"><span class="sec-num">05</span><h2>The object model</h2></div>
+    <p>Every securable object type gets the same three functions: a reference constructor, a property query, and a property-support probe. The probe exists because properties are versioned, so check support at runtime instead of assuming a fixed schema.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Object type</th><th>Reference constructors</th><th>Query</th><th>Support probe</th></tr></thead>
+        <tbody>
+          <tr><td>File</td><td class="mono">EspCreateFileReferenceById, ByPath</td><td class="mono">EspQueryFileProperties</td><td class="mono">EspIsFilePropertySupported</td></tr>
+          <tr><td>FileObject</td><td>&mdash;</td><td class="mono">EspQueryFileObjectProperties</td><td class="mono">EspIsFileObjectPropertySupported</td></tr>
+          <tr><td>FileStream</td><td class="mono">EspCreateFileStreamReferenceById, ByPath</td><td class="mono">EspQueryFileStreamProperties</td><td class="mono">EspIsFileStreamPropertySupported</td></tr>
+          <tr><td>Process</td><td class="mono">EspCreateProcessReference</td><td class="mono">EspQueryProcessProperties</td><td class="mono">EspIsProcessPropertySupported</td></tr>
+          <tr><td>Thread</td><td class="mono">EspCreateThreadReference</td><td class="mono">EspQueryThreadProperties</td><td class="mono">EspIsThreadPropertySupported</td></tr>
+          <tr><td>Token</td><td class="mono">EspCreateProcessTokenReference, ThreadTokenReference</td><td class="mono">EspQueryTokenProperties</td><td class="mono">EspIsTokenPropertySupported</td></tr>
+          <tr><td>RegistryKey</td><td class="mono">EspCreateRegistryKeyReference</td><td class="mono">EspQueryRegistryKeyProperties</td><td class="mono">EspIsRegistryKeyPropertySupported</td></tr>
+          <tr><td>RegistryKeyObject</td><td>&mdash;</td><td class="mono">EspQueryRegistryKeyObjectProperties</td><td class="mono">EspIsRegistryKeyObjectPropertySupported</td></tr>
+          <tr><td>Disk</td><td class="mono">EspCreateDiskReference</td><td class="mono">EspQueryDiskProperties</td><td class="mono">EspIsDiskPropertySupported</td></tr>
+          <tr><td>Volume</td><td class="mono">EspCreateVolumeReference</td><td class="mono">EspQueryVolumeProperties</td><td class="mono">EspIsVolumePropertySupported</td></tr>
+          <tr><td>Pipe</td><td class="mono">EspCreatePipeReference</td><td class="mono">EspQueryPipeProperties</td><td class="mono">EspIsPipePropertySupported</td></tr>
+          <tr><td>Mailslot</td><td class="mono">EspCreateMailslotReference</td><td class="mono">EspQueryMailslotProperties</td><td class="mono">EspIsMailslotPropertySupported</td></tr>
+          <tr><td>Desktop</td><td class="mono">EspCreateDesktopReference</td><td class="mono">EspQueryDesktopProperties</td><td class="mono">EspIsDesktopPropertySupported</td></tr>
+          <tr><td>KtmTransaction</td><td>&mdash;</td><td class="mono">EspQueryKtmTransactionProperties</td><td class="mono">EspIsKtmTransactionPropertySupported</td></tr>
+          <tr><td>Client</td><td>&mdash;</td><td class="mono">EspQueryClientProperties</td><td class="mono">EspIsClientPropertySupported</td></tr>
+          <tr><td>Event</td><td class="mono">EspCreateEventObjectReference, ById</td><td>&mdash;</td><td class="mono">EspIsEventPropertySupported</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Generic handling works across types through <code class="mono">EspGetEventObjectType</code>, <code class="mono">EspGetEventObjectId</code>, and <code class="mono">EspDuplicateEventObjectReference</code>. Context keys (<code class="mono">EspSetEventObjectContextKey</code>, <code class="mono">EspSetClientContextKey</code>) let you attach and later enumerate your own annotations on objects and on your client.</p>
+  </section>
+
+  <section id="filters">
+    <div class="sec-head"><span class="sec-num">06</span><h2>The filter and rule engine</h2></div>
+    <p>A <b>filter</b> is one predicate node: either a leaf that compares a property of an object, or a boolean combination of two other filters. A <b>rule</b> is a compiled, GUID-identified filter tree installed against a client. Only events that satisfy an active rule reach that client's queue, and the evaluation happens in the kernel.</p>
+
+    <h3>Grammar</h3>
+    <div class="tree"><pre>Filter ::= Leaf(ObjectType, PropertyId, ComparisonType, Value)
+         | NOT(Filter)
+         | AND(Filter, Filter)
+         | OR(Filter, Filter)
+         | XOR(Filter, Filter)</pre></div>
+
+    <h3>Leaf object types <span class="chip ok">confirmed</span></h3>
+    <p>Each <code class="mono">EspCreate*Filter</code> call passes a distinct <code class="mono">FilterType</code> to <code class="mono">Esp::Details::CreateFilterInternal</code>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">FilterType</th><th>Object</th><th>API</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td>Generic comparand</td><td class="mono">EspCreateFilter</td></tr>
+          <tr><td class="mono">2</td><td>Client</td><td class="mono">EspCreateClientFilter</td></tr>
+          <tr><td class="mono">3</td><td>Event</td><td class="mono">EspCreateEventFilter</td></tr>
+          <tr><td class="mono">4</td><td>Thread</td><td class="mono">EspCreateThreadFilter</td></tr>
+          <tr><td class="mono">5</td><td>Process</td><td class="mono">EspCreateProcessFilter</td></tr>
+          <tr><td class="mono">6</td><td>File</td><td class="mono">EspCreateFileFilter</td></tr>
+          <tr><td class="mono">7</td><td>FileObject</td><td class="mono">EspCreateFileObjectFilter</td></tr>
+          <tr><td class="mono">8</td><td>FileStream</td><td class="mono">EspCreateFileStreamFilter</td></tr>
+          <tr><td class="mono">9</td><td>Volume</td><td class="mono">EspCreateVolumeFilter</td></tr>
+          <tr><td class="mono">0xA</td><td>Disk</td><td class="mono">EspCreateDiskFilter</td></tr>
+          <tr><td class="mono">0xB</td><td>RegistryKey</td><td class="mono">EspCreateRegistryKeyFilter</td></tr>
+          <tr><td class="mono">0xC</td><td>RegistryKeyObject</td><td class="mono">EspCreateRegistryKeyObjectFilter</td></tr>
+          <tr><td class="mono">0xD</td><td>Network endpoint, 15 properties, likely remote-access context</td><td>No public wrapper</td></tr>
+          <tr><td class="mono">0xE</td><td>Desktop</td><td class="mono">EspCreateDesktopFilter</td></tr>
+          <tr><td class="mono">0xF</td><td>KtmTransaction</td><td class="mono">EspCreateKtmTransactionFilter</td></tr>
+          <tr><td class="mono">0x10</td><td>Pipe</td><td class="mono">EspCreatePipeFilter</td></tr>
+          <tr><td class="mono">0x11</td><td>Mailslot</td><td class="mono">EspCreateMailslotFilter</td></tr>
+          <tr><td class="mono">0x12</td><td>Token</td><td class="mono">EspCreateTokenFilter</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><code class="mono">CreateFilterInternal</code> validates the type, then remaps it to a second, differently ordered discriminant before calling into Rust. Public <code>Event</code> (3) becomes internal 1, public <code>File</code> (6) becomes internal 7, and public <code>FileStream</code> (8) becomes internal 6. The public ABI enum and the internal Rust enum evolved independently.</p>
+
+    <h3>How many properties each type has <span class="chip ok">confirmed</span></h3>
+    <p>Decoding the 19-entry jump table inside <code class="mono">espclient_rs::filter::Filter::new</code> and disassembling each arm recovers the property count per type. Every arm loads the caller's <code class="mono">PropertyId</code>, rejects negatives, then bounds-checks it. The bound plus one is the number of properties that type defines.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Object type</th><th class="mono">internal idx</th><th class="mono">bound</th><th class="tabular">properties</th><th class="mono">kind const</th></tr></thead>
+        <tbody>
+          <tr><td>FileObject</td><td class="mono">8</td><td class="mono">0x1C</td><td class="tabular">29</td><td class="mono">6</td></tr>
+          <tr><td>Process</td><td class="mono">5</td><td class="mono">0x17</td><td class="tabular">24</td><td class="mono">4</td></tr>
+          <tr><td>File</td><td class="mono">7</td><td class="mono">0x12</td><td class="tabular">19</td><td class="mono">5</td></tr>
+          <tr><td>Volume</td><td class="mono">9</td><td class="mono">0x10</td><td class="tabular">17</td><td class="mono">8</td></tr>
+          <tr><td>FilterType 0xD</td><td class="mono">13</td><td class="mono">0x0E</td><td class="tabular">15</td><td class="mono">0x0C</td></tr>
+          <tr><td>Disk</td><td class="mono">10</td><td class="mono">0x0D</td><td class="tabular">14</td><td class="mono">9</td></tr>
+          <tr><td>Token</td><td class="mono">18</td><td class="mono">0x0C</td><td class="tabular">13</td><td class="mono">0x11</td></tr>
+          <tr><td>Thread</td><td class="mono">4</td><td class="mono">0x0B</td><td class="tabular">12</td><td class="mono">3</td></tr>
+          <tr><td>FileStream</td><td class="mono">6</td><td class="mono">4</td><td class="tabular">5</td><td class="mono">7</td></tr>
+          <tr><td>RegistryKey</td><td class="mono">11</td><td class="mono">4</td><td class="tabular">5</td><td class="mono">0x0A</td></tr>
+          <tr><td>KtmTransaction</td><td class="mono">15</td><td class="mono">3</td><td class="tabular">4</td><td class="mono">0x0E</td></tr>
+          <tr><td>RegistryKeyObject</td><td class="mono">12</td><td class="mono">2</td><td class="tabular">3</td><td class="mono">0x0B</td></tr>
+          <tr><td>Pipe</td><td class="mono">16</td><td class="mono">2</td><td class="tabular">3</td><td class="mono">0x0F</td></tr>
+          <tr><td>Mailslot</td><td class="mono">17</td><td class="mono">2</td><td class="tabular">3</td><td class="mono">0x10</td></tr>
+          <tr><td>Client</td><td class="mono">2</td><td colspan="2">Boolean-only inline path</td><td>&mdash;</td></tr>
+          <tr><td>Desktop</td><td class="mono">14</td><td colspan="2">Boolean-only inline path</td><td>&mdash;</td></tr>
+          <tr><td>Event</td><td class="mono">1</td><td colspan="2">Sparse check, not a contiguous range</td><td>&mdash;</td></tr>
+          <tr><td>Generic</td><td class="mono">3</td><td colspan="3">No property bound. Dispatches on comparison type instead.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <b>FilterType 0xD isn't a reserved hole.</b> Its arm is fully populated with 15 valid properties and kind constant <code class="mono">0x0C</code>, which slots cleanly between RegistryKeyObject (<code class="mono">0x0B</code>) and KtmTransaction (<code class="mono">0x0E</code>). It's a working object type with no exported wrapper in this build, reachable only by calling into the Rust core directly with type 13. Its identity remains <span class="chip gap">not recovered</span>. Kind constant <code class="mono">0x0D</code> is the one genuinely absent, consumed by Desktop's special-cased boolean path.
+    </div>
+
+    <h3>Property types, recovered <span class="chip ok">confirmed</span></h3>
+    <p>Property names aren't in these binaries, but property <em>types</em> are, and they're recoverable. Each object type has a Rust descriptor enum, for example <code class="mono">espclient_rs::filter::file::FileFilterDescriptor</code>, whose <code class="mono">try_from_bytes</code> dispatches through a jump table indexed by the property ID. One arm per property. Each arm calls the constructor for that property's value kind, so decoding the table and resolving each arm's call target yields a typed map of the entire property space.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Object type</th><th>Property ID &rarr; value kind, in order from 0</th></tr></thead>
+        <tbody>
+          <tr><td>Thread</td><td class="mono">Context, Numeric, Numeric, Bool, Bool, Numeric, MemAddr, String, String, MemAddr, String, String</td></tr>
+          <tr><td>Process</td><td class="mono">Context, String, Numeric, Bool, Bool, Bool, Numeric &times;6, Bool, Numeric &times;6, String, Numeric, String, String, Bool, Bool</td></tr>
+          <tr><td>File</td><td class="mono">Context, ?, Numeric &times;5, EaList, Bool &times;4, SecDesc, Numeric, Numeric, Binary, Numeric, String, Numeric</td></tr>
+          <tr><td>FileObject</td><td class="mono">Context, String &times;10, Bool &times;7, Numeric, Bool &times;9, Numeric</td></tr>
+          <tr><td>FileStream</td><td class="mono">Context, String, Numeric, Numeric, Bool</td></tr>
+          <tr><td>Volume</td><td class="mono">Context, String, String, Numeric &times;3, Binary, String, Bool &times;5, Numeric &times;3, String</td></tr>
+          <tr><td>Disk</td><td class="mono">Context, String, String, String, Numeric, String, String, Numeric, String, Bool, Bool, Bool, Numeric, ?</td></tr>
+          <tr><td>RegistryKey</td><td class="mono">Context, String, String, Bool, SecDesc</td></tr>
+          <tr><td><b>NetworkConnection</b> (FilterType 0xD)</td><td class="mono">Context, <b>IpAddress, IpAddress, Port, Port</b>, Binary, <b>Port</b>, Numeric &times;3, <b>Port</b>, ?, ?, ?, ?</td></tr>
+          <tr><td>KtmTransaction</td><td class="mono">Context, Binary, Numeric, Numeric</td></tr>
+          <tr><td>Token</td><td class="mono">Context, <b>Sid</b>, Bool, Numeric, <b>TokenGroups</b>, <b>Sid</b>, <b>Sid</b>, <b>TokenPrivileges</b>, Numeric, Numeric, <b>Sid</b>, Numeric, Numeric</td></tr>
+          <tr><td>Event</td><td class="mono">Context, Bool, Numeric, Numeric, ?, ?</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Every object type's property 0 is <code class="mono">Context</code>, the client's own context-key channel rather than an intrinsic attribute. Types with three or fewer properties (RegistryKeyObject, Pipe, Mailslot, Desktop, Client) compile to compare-and-branch chains instead of jump tables, so this technique doesn't reach them; their counts are known from <a href="#filters">the bounds checks</a> and Desktop and Client are boolean-only. Pipe and Mailslot share a single <code class="mono">PipeFilterDescriptor</code>.</p>
+    <div class="callout">
+      <b>Externally validated, with three names attached.</b> A public proof-of-concept consumer (see <a href="#credits">credits</a>) hard-codes three Process property IDs: <code class="mono">kProcessCommandLine = 1</code>, <code class="mono">kProcessId = 6</code>, and <code class="mono">kProcessImagePath = 20</code>. The map above independently predicts property 1 as <code>String</code>, property 6 as <code>Numeric</code>, and property 20 as <code>String</code>. All three match. That corroborates the extraction technique against code written by someone with a working system, and it anchors three real names onto the typed map.
+    </div>
+    <p>The types constrain the unnamed properties hard. File exposes exactly one <code>String</code> property, at ID 17, which is almost certainly the path. Thread carries two <code>MemAddr</code> properties, the natural fit for a start address and a TEB or stack base, which is the raw material for injection detection. Token's shape is unmistakable: four <code>Sid</code> properties plus dedicated <code>TokenGroups</code> and <code>TokenPrivileges</code> kinds. FileObject's ten strings followed by seventeen booleans reads as a path family followed by decomposed access and create flags.</p>
+    <div class="callout">
+      <b>This identifies <code class="mono">FilterType 0xD</code>.</b> Two <code>IpAddress</code> properties and four <code>Port</code> properties make it a network endpoint, and the symbol table names it outright: <code class="mono">espclient_rs::filter::network::NetworkConnectionFilterDescriptor</code> <span class="chip ok">confirmed</span>. There is a whole <code>filter::network</code> module. The rule engine models <b>network connections</b> as a first-class filterable object, with dedicated <code class="mono">IpAddress</code> and <code class="mono">Port</code> comparison kinds to match. It has no exported <code class="mono">EspCreate*Filter</code> wrapper in this build, and the driver has no network data source (<a href="#driver-gap">section 12</a>), so the schema is built out ahead of the plumbing.
+    </div>
+    <p>The extraction also surfaced two comparison value kinds not visible elsewhere: <code class="mono">PortComparison</code> and <code class="mono">TokenGroupsComparison</code>, bringing the client-side total to fourteen.</p>
+
+    <h3>Comparison operators <span class="chip ok">confirmed</span></h3>
+    <p><code class="mono">ESP_COMPARISON_TYPE</code> has exactly 19 values, 0 through 18. <code class="mono">EspRsCreateFilter</code> bounds-checks the field with <code class="mono">&lt; 0x13</code>.</p>
+    <p>The driver evaluates comparisons through three value-kind-specific functions in <code class="mono">wesp_lib::filter::comparison</code>: <code class="mono">evaluate_numeric_op</code>, <code class="mono">evaluate_string_op</code>, and <code class="mono">BinaryComparison::evaluate_op</code>. Each dispatches on an operator byte read straight off the wire through <code class="mono">read_zerocopy</code>, so the wire value is the Rust discriminant with no translation.</p>
+    <p>On the client side, <code class="mono">DataComparison::try_from_raw</code> validates the ordinal against the property's value kind before handing off.</p>
+    <pre><code><span class="kw">if</span> (kind == <span class="kw">0</span>)      { <span class="kw">if</span> (ordinal &gt; <span class="kw">0xb</span>) err; NumericComparison::try_from_raw(..) }  <span class="cm">// 1..11</span>
+<span class="kw">else if</span> (kind == <span class="kw">1</span>) { <span class="kw">if</span> (ordinal &gt;= <span class="kw">5</span>)  err; StringComparison::try_from_raw(..)  }  <span class="cm">// 1..4</span>
+<span class="kw">else</span>                { <span class="kw">if</span> (ordinal &gt; <span class="kw">3</span>)   err; BinaryComparison::try_from_raw(..)  }  <span class="cm">// 1..3</span>
+<span class="cm">// ordinal 0 is rejected in every branch</span></code></pre>
+    <p>Those caps of 11, 4, and 3 match the 12, 4, and 3 switch arms in the driver's evaluators. Two cross-checks fix the offset: numeric ordinal 11 takes the collection path where the driver's numeric operator 10 is the collection test, and string ordinal 4 does the same against string operator 3. So <code class="mono">driver_op = ordinal - 1</code>, with 0 reserved as invalid. Combining that with each switch body gives the operator semantics.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">ordinal</th><th>Numeric property</th><th>String property</th><th>Binary property</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0</td><td colspan="3">Invalid, rejected</td></tr>
+          <tr><td class="mono">1</td><td>Equal</td><td>Equal</td><td>Equal, using memcmp</td></tr>
+          <tr><td class="mono">2</td><td>NotEqual</td><td>NotEqual</td><td>NotEqual</td></tr>
+          <tr><td class="mono">3</td><td>LessThan</td><td>MatchesPattern, wildcard</td><td>InCollection</td></tr>
+          <tr><td class="mono">4</td><td>LessOrEqual</td><td>InCollection</td><td>&mdash;</td></tr>
+          <tr><td class="mono">5</td><td>GreaterThan</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">6</td><td>GreaterOrEqual</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">7</td><td>Bitwise: all masked bits set</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">8</td><td>Bitwise: no bits in common</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">9</td><td>Bitwise: any bit in common</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">10</td><td>Bitwise: not a subset</td><td>&mdash;</td><td>&mdash;</td></tr>
+          <tr><td class="mono">11</td><td>InCollection</td><td>&mdash;</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The driver's numeric evaluator has a twelfth arm, operator <code class="mono">0xb</code>, an inclusive two-bound range test that requires a specific right-hand-side variant. It sits one past the public cap, so the public ordinals can't reach it. The right-hand side selects it, and it's likely reserved for stored or internal filters <span class="chip inf">inferred</span>.</p>
+    <p>Case sensitivity isn't encoded in the ordinal. <code class="mono">StringComparison::try_from_raw</code> reads it from a separate field, which the manifest names <code class="mono">StringFlags</code>, and <code class="mono">evaluate_string_op</code> feeds it to <code class="mono">RtlCompareUnicodeString</code>.</p>
+
+    <h4>Value kinds</h4>
+    <p>The three evaluators decoded in the driver are a subset. <code class="mono">espclient_rs::filter::comparison</code> defines twelve kinds, each with its own conversion and predicate functions: Numeric, String, Binary, Bool, Sid, Context, Data, EaList, IpAddress, TokenPrivileges, MemoryAddressBasic, and SecurityDescriptor. <code>IpAddress</code> is notable because no network object type appears in the public <code class="mono">FilterType</code> list. Numeric comparisons also carry transform lists on two operand slots, so a value can be normalized before comparison.</p>
+    <p>The right-hand side of a comparison is a tagged union: a plain value, a two-bound range, or a collection reference. The same shape recurs across value kinds, which is why collection membership works uniformly regardless of property type.</p>
+
+    <h3>Composite operators <span class="chip ok">confirmed</span></h3>
+    <p>AND, OR, and XOR are binary and share <code class="mono">Esp::CreateCompositeFilter</code>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Operator</th><th>Meaning</th><th>API</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td>AND</td><td class="mono">EspCreateAndFilter</td></tr>
+          <tr><td class="mono">2</td><td>OR</td><td class="mono">EspCreateOrFilter</td></tr>
+          <tr><td class="mono">3</td><td>XOR</td><td class="mono">EspCreateXorFilter</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>NOT is unary and takes its own path through <code class="mono">EspCreateNotFilter</code>.</p>
+
+    <h3>Compiling and installing rules <span class="chip ok">confirmed</span></h3>
+    <ul class="tight">
+      <li><code class="mono">EspCreateRule(filter, &amp;outRule)</code> compiles the tree into an opaque, GUID-tagged rule. It packs typed sub-configs for each referenced object kind, including <code class="mono">EventConfig</code>, <code class="mono">ContextKeyConfig</code>, <code class="mono">ClientPropertyQuery</code>, <code class="mono">ThreadConfig</code>, and <code class="mono">ProcessConfig</code>. Compilation resolves bindings, not just tree shape.</li>
+      <li><code class="mono">EspUpdateRules(client, updateFlags, count, entries)</code> pushes update entries. The second argument is <code class="mono">ESP_RULE_UPDATE_FLAGS</code>, confirmed by both the internal method signature and the manifest field name <code class="mono">Flags</code>. A rule is scoped to an event type by including an Event leaf filter in its tree, not through this call.</li>
+      <li><code class="mono">EspEnumerateRuleIds</code> and <code class="mono">EspEnumerateAllRulesForClient</code> list active rules. <code class="mono">EspRemoveRulesForClient</code>, <code class="mono">EspRemoveAllRulesForClient</code>, and <code class="mono">EspCloseRule</code> tear them down.</li>
+    </ul>
+    <p>Each update entry carries an operation tag.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Tag</th><th>Payload</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1, 2</td><td>A compiled rule handle</td><td>Install or replace a rule</td></tr>
+          <tr><td class="mono">3, 4, 5</td><td>Two raw GUIDs</td><td>Reference-only operation: enable, disable, or remove by ID <span class="chip inf">inferred</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The driver normalizes these. <code class="mono">RuleUpdateCommand::try_from_message</code> dispatches through a table with 15 wire-tag arms. Each arm validates the message fields and asserts that fields unused by that variant are zero, then writes one of six internal command codes. Codes 0, 1, 2, and 4 carry no payload; code 3 carries a full field set; code 5 carries a single handle. The layering runs 5 client-visible tags to 15 wire variants to 6 internal commands.</p>
+
+    <h3>Complete rule reference</h3>
+    <p>Everything a rule can express is a combination of the axes below. Each axis is enumerated in full, so this covers the entire rule space with one gap called out at the end.</p>
+
+    <h4>1. Rule anatomy</h4>
+    <p>The persisted schema gives the complete field set of a rule <span class="chip ok">confirmed</span>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Field</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">version</td><td>Schema version of the stored rule</td></tr>
+          <tr><td class="mono">event_type</td><td>Which event the rule applies to, from the enumeration below</td></tr>
+          <tr><td class="mono">filter</td><td>The compiled predicate tree</td></tr>
+          <tr><td class="mono">action</td><td>What happens on a match. Two members known: <code class="mono">MatchSubrules</code>, <code class="mono">ForceAllow</code></td></tr>
+          <tr><td class="mono">subrules</td><td>Child rules, resolved during a finalize pass. Rules nest</td></tr>
+          <tr><td class="mono">is_top_level</td><td>Whether this rule is an entry point or only reachable as a subrule</td></tr>
+          <tr><td class="mono">order_group</td><td>Evaluation ordering bucket</td></tr>
+          <tr><td class="mono">enabled</td><td>Toggle without deleting</td></tr>
+          <tr><td class="mono">flags</td><td>Rule flags</td></tr>
+          <tr><td class="mono">lifetime</td><td>Transient or persistent scope</td></tr>
+          <tr><td class="mono">notification</td><td>Notification configuration for matches</td></tr>
+          <tr><td class="mono">context_key_updates</td><td>Context-key mutations applied on match</td></tr>
+          <tr><td class="mono">modify</td><td>Modification data</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Two consequences. Rules form a <b>tree</b>, not a list: a rule whose action is <code class="mono">MatchSubrules</code> delegates to children, and the engine runs a resolution pass over unresolved subrule references. And a rule can <b>mutate state</b> through <code class="mono">context_key_updates</code>, so matching one event can change what later events match, which makes the engine stateful rather than purely declarative.</p>
+
+    <h4>The action enum <span class="chip ok">confirmed</span></h4>
+    <p>Two independent views of <code class="mono">wesp_lib::rule::RuleAction</code> pin down its size and shape, even though the variant names aren't in the binary.</p>
+    <p><b>Size.</b> <code class="mono">RuleAction::from_incoming</code> converts the wire value to the internal enum by dispatching through a table at <code class="mono">0x1803E8010</code> with <b>10 distinct arms</b>, so the client-visible action set has 10 members.</p>
+    <p><b>Shape.</b> <code class="mono">drop_in_place&lt;RuleAction&gt;</code> has to know each variant's payload in order to free it, so its switch exposes the payload type per discriminant:</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Discriminant</th><th>Payload</th><th>What that implies</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td class="mono">Vec&lt;Arc&lt;Rule&gt;&gt;</td><td>Child rules. This is <code class="mono">MatchSubrules</code>.</td></tr>
+          <tr><td class="mono">2, 3</td><td class="mono">Arc&lt;EventQueue&gt;</td><td>Carries a queue reference, so these are <b>routing</b> actions: deliver the match to a specific queue.</td></tr>
+          <tr><td class="mono">5, 6</td><td class="mono">Option&lt;Arc&lt;EventQueue&gt;&gt;</td><td>Routing with an optional destination.</td></tr>
+          <tr><td class="mono">4</td><td>None</td><td>No payload at all. An action that carries no data can only be a <b>verdict</b>.</td></tr>
+          <tr><td class="mono">0</td><td>None or empty</td><td>Likely the default or no-op.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <b>This answers the routing-versus-gating question: it's both.</b> The action enum mixes two kinds of outcome. Variants carrying an <code class="mono">Arc&lt;EventQueue&gt;</code> decide <em>where a matched event goes</em>, which is pure routing. Variants carrying no payload can't be routing, because there's nowhere to route to, and the driver already has a five-entry verdict table wired to the file pre-operation return (<a href="#lifecycle">section 4</a>). So the engine expresses delivery and decision through the same field. What remains unrecovered is which specific ordinal a third-party client may legally set, and <code class="mono">ForceAllow</code> being flagged internal shows at least one is reserved.
+    </div>
+
+    <h4>2. Event types, all 47, with exact values</h4>
+    <p><code class="mono">EspRsCreateRule</code> validates the rule's event type against a fixed set of ranges. Combining those ranges with the constant-name ordering and one external data point (a public proof-of-concept uses 1000 for process creation, see <a href="#credits">credits</a>) resolves the numbering completely <span class="chip ok">confirmed</span>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th class="mono">Value</th><th class="mono">ESP_EVENT_TYPE_&hellip;</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0</td><td class="mono">NONE</td></tr>
+          <tr><td class="mono">1, 2, 3</td><td class="mono">THREAD_CREATE, THREAD_START, THREAD_TERMINATE</td></tr>
+          <tr><td class="mono">1000&ndash;1002</td><td class="mono">PROCESS_CREATE, PROCESS_TERMINATE, PROCESS_LOAD_IMAGE</td></tr>
+          <tr><td class="mono">2000&ndash;2004</td><td class="mono">FO_CREATE, FO_OPEN, FO_READ, FO_WRITE, FO_CLEANUP</td></tr>
+          <tr><td class="mono">3000&ndash;3009</td><td class="mono">FS_CREATE_FILE_SECTION, FS_QUERY_FILE_INFORMATION, FS_SET_FILE_INFORMATION, FS_SET_FILE_SECURITY, FS_QUERY_DIRECTORY_INFORMATION, FS_FSCTL_FILE, FS_SET_EA, FS_QUERY_OPEN_FILE, FS_LOCK_FILE, FS_UNLOCK_FILE</td></tr>
+          <tr><td class="mono">3010, 3011</td><td class="mono">KTM_TRANSACTION_COMMIT, KTM_TRANSACTION_ROLLBACK</td></tr>
+          <tr><td class="mono">4000&ndash;4002</td><td class="mono">VOLUME_MOUNT, VOLUME_DISMOUNT, VOLUME_FSCTL</td></tr>
+          <tr><td class="mono">5000</td><td class="mono">PIPE_CREATE</td></tr>
+          <tr><td class="mono">6000</td><td class="mono">MAILSLOT_CREATE</td></tr>
+          <tr><td class="mono">7000&ndash;7014</td><td class="mono">REG_CREATE_KEY, REG_OPEN_KEY, REG_DELETE_KEY, REG_SET_VALUE_KEY, REG_DELETE_VALUE_KEY, REG_RENAME_KEY, REG_REPLACE_KEY, REG_RESTORE_KEY, REG_SET_KEY_SECURITY, REG_QUERY_KEY, REG_QUERY_VALUE_KEY, REG_SAVE_KEY, REG_LOAD_KEY, REG_ENUM_KEY, REG_ENUM_VALUE_KEY</td></tr>
+          <tr><td class="mono">8000, 8001</td><td class="mono">OB_CREATE_HANDLE, OB_DUPLICATE_HANDLE</td></tr>
+          <tr><td class="mono">9000</td><td class="mono">BOOT_LOAD_DRIVER</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Every group size matches its range exactly: thread 3 in 1&ndash;3, process 3 in 1000&ndash;1002, file object 5 in 2000&ndash;2004, ten file-system plus two transaction types filling 3000&ndash;3011, registry 15 in 7000&ndash;7014, object manager 2, and one each for pipe, mailslot, and boot. Nothing is reserved or unaccounted for.</p>
+
+    <h4>3. Object sources, all 20</h4>
+    <p>A predicate reads a field from one of these sources <span class="chip ok">confirmed</span>.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Group</th><th>Sources</th></tr></thead>
+        <tbody>
+          <tr><td>Execution</td><td class="mono">Process, Thread, Token, AccessState</td></tr>
+          <tr><td>File system</td><td class="mono">File, FileObject, FileStream, Volume, Disk</td></tr>
+          <tr><td>Named pipes and IPC</td><td class="mono">Pipe, Mailslot</td></tr>
+          <tr><td>Registry</td><td class="mono">RegistryKey, RegistryKeyObject</td></tr>
+          <tr><td>Other kernel objects</td><td class="mono">Desktop, KtmTransaction, SecurityDescriptor, MemoryAddressBasic</td></tr>
+          <tr><td>Operation and remote context</td><td class="mono">IoOperation, RemoteClient, IpAddress</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>This list is wider than the public <code class="mono">FilterType</code> enumeration, which has no constructor for <code class="mono">IoOperation</code>, <code class="mono">RemoteClient</code>, <code class="mono">AccessState</code>, <code class="mono">IpAddress</code>, or <code class="mono">SecurityDescriptor</code>. Those are reachable to the rule engine even where no exported <code class="mono">EspCreate*Filter</code> targets them, which is a plausible home for the unnamed <code class="mono">FilterType 0xD</code>.</p>
+
+    <h4>4. Field value kinds, all 9</h4>
+    <p><code class="mono">Numeric</code>, <code class="mono">Bool</code>, <code class="mono">String</code>, <code class="mono">StringList</code>, <code class="mono">Binary</code>, <code class="mono">Sid</code>, <code class="mono">EcpList</code>, <code class="mono">EaList</code>, <code class="mono">ByteRange</code> <span class="chip ok">confirmed</span>. The kind of the property you select determines which comparison operators are legal, as enforced by <code class="mono">DataComparison::try_from_raw</code>.</p>
+    <p>Client-side comparison types extend this with <code class="mono">Context</code>, <code class="mono">Data</code>, <code class="mono">IpAddress</code>, <code class="mono">TokenPrivileges</code>, <code class="mono">MemoryAddressBasic</code>, and <code class="mono">SecurityDescriptor</code> variants, each with its own conversion path.</p>
+
+    <h4>5. Comparison operators</h4>
+    <p>Fully enumerated with semantics in the table earlier in this section: 11 numeric, 4 string, 3 binary, with ordinal 0 reserved as invalid. Matching comparands exist for each kind, including <code class="mono">ByteRangeComparand</code> for offset-and-length binary matching, <code class="mono">StringListComparand</code>, <code class="mono">SidComparand</code>, and <code class="mono">IpAddressComparand</code>.</p>
+
+    <h4>6. Composition</h4>
+    <p><code class="mono">AND</code> (1), <code class="mono">OR</code> (2), <code class="mono">XOR</code> (3), and unary <code class="mono">NOT</code>, composing to arbitrary depth. Above the filter tree, rules compose again through <code class="mono">subrules</code> and <code class="mono">order_group</code>.</p>
+
+    <h4>7. Ancestry matching</h4>
+    <p><code class="mono">ProcessChainMatchKind</code> and <code class="mono">ProcessRootSource</code> make process lineage a first-class predicate rather than something you reconstruct client-side, backed by <code class="mono">RelatedObjectCollection::collect_process_chain</code> in the driver <span class="chip ok">confirmed</span>. The match kind enumeration itself is <span class="chip gap">not recovered</span>.</p>
+
+    <h4>8. Outcome</h4>
+    <p>A match produces an action, optional notification, and optional context-key updates. For file creation the verdict maps to the deny table in <a href="#lifecycle">section 4</a>, covering allow, access denied, virus infected, and not found.</p>
+
+    <div class="callout">
+      <b>The one gap in this coverage.</b> Every axis above is enumerated completely except <b>property names</b>. You know how many properties each object type exposes, and now the <b>value kind of each one by ID</b> (see the typed map above), which fixes exactly which operators are legal for each. What you can't get from these binaries is which integer means <code>Path</code> versus <code>Extension</code>. Those names appear nowhere in the driver, the client library, the ETW manifest, or the PDBs, which are public symbol files without a type stream. Capturing the <code class="mono">Microsoft.Windows.WESP.Client</code> provider on a live system resolves them, because the start events log <code class="mono">PropertyId</code> next to the operand it's compared against.
+    </div>
+
+    <h3>Capability negotiation <span class="chip ok">confirmed</span></h3>
+    <p><code class="mono">EspGetEventCapabilities(client, eventType, &amp;caps)</code> round-trips to the driver before you commit to rules for an event type. The internal signature confirms both parameter types are real enums, <code class="mono">ESP_EVENT_TYPE</code> and <code class="mono">ESP_EVENT_CAPABILITIES</code>, though their members are <span class="chip gap">not recovered</span>. Together with the per-object support probes, the whole filter surface is versioned. Query support and degrade gracefully rather than assuming a fixed schema across builds.</p>
+  </section>
+
+  <section id="collections">
+    <div class="sec-head"><span class="sec-num">07</span><h2>Collections</h2></div>
+    <p>A collection is a typed, driver-persisted set. The driver implements binary, integer, and string collections, the last with pattern compilation for wildcard entries. You push one into the driver with <code class="mono">EspCreateCollection</code> and <code class="mono">EspUpdateCollection</code>, then enumerate it with <code class="mono">EspEnumerateCollectionEntries</code>. Creation takes a <code class="mono">Type</code>, a <code class="mono">Lifetime</code>, and <code class="mono">StringFlags</code>.</p>
+    <p>Collections matter because a filter predicate can reference one directly through <code class="mono">open_collection_for_predicate</code>. This is the allow-list and deny-list primitive: you can express "block if this hash is in my blocklist" as a leaf that tests set membership in the kernel, with no round trip to user mode per event.</p>
+  </section>
+
+  <section id="wire">
+    <div class="sec-head"><span class="sec-num">08</span><h2>The wire protocol</h2></div>
+    <ul class="tight">
+      <li>The port is <code class="mono">\EspFilterPort</code> <span class="chip ok">confirmed</span>.</li>
+      <li>Client requests deserialize as a typed enum, <code class="mono">wesp_api_types::message::port::ClientRequest</code> <span class="chip ok">confirmed</span>.</li>
+      <li>Notifications are framed as a <code class="mono">FILTER_MESSAGE_HEADER</code> plus payload in a fixed 0x1010-byte buffer, delivered through overlapped I/O armed against a completion port <span class="chip ok">confirmed</span>.</li>
+      <li>Wire predicates are typed per object type and value kind, for example <code class="mono">VolumeNumericProperty</code>, <code class="mono">DesktopStringProperty</code>, and <code class="mono">DiskBooleanProperty</code>. Each carries a matching operator enum such as <code class="mono">NumericOperator</code>, <code class="mono">StringOperator</code>, or <code class="mono">SidOperator</code> <span class="chip ok">confirmed</span>.</li>
+      <li><code class="mono">ClientMessage::verify_capabilities</code> runs before message handling, so individual message types are gated <span class="chip ok">confirmed</span>. See <a href="#security">section 10</a>.</li>
+      <li>Collection query responses copy into the caller's buffer through <code class="mono">copy_user_memory</code> <span class="chip ok">confirmed</span>.</li>
+    </ul>
+  </section>
+
+  <section id="example">
+    <div class="sec-head"><span class="sec-num">09</span><h2>Build a rule</h2></div>
+    <p>Two examples: one that observes, one that blocks. Property IDs and comparison constants are placeholders throughout <span class="chip inf">inferred</span>, since property names aren't recoverable from these binaries. The call shapes, tree structure, event scoping, and verdict mapping are <span class="chip ok">confirmed</span>.</p>
+    <h3>An observational rule</h3>
+    <p>Notify on file writes under <code>C:\Windows\System32\</code> when the writing process isn't Microsoft-signed, excluding <code>.tmp</code> files.</p>
+    <pre><code><span class="cm">// Leaf filters</span>
+EspFilterHandle hPathFilter;
+EspCreateFileFilter(FILE_PROP_PATH, ESP_CMP_STARTS_WITH,
+                     <span class="str">L"C:\\Windows\\System32\\"</span>, &amp;hPathFilter);
+
+EspFilterHandle hExtFilter;
+EspCreateFileFilter(FILE_PROP_EXTENSION, ESP_CMP_EQUAL,
+                     <span class="str">L".tmp"</span>, &amp;hExtFilter);
+
+EspFilterHandle hNotTmp;
+EspCreateNotFilter(hExtFilter, &amp;hNotTmp);
+
+EspFilterHandle hSignerFilter;
+EspCreateProcessFilter(PROCESS_PROP_SIGNER, ESP_CMP_NOT_EQUAL,
+                        &amp;SignerMicrosoft, &amp;hSignerFilter);
+
+<span class="cm">// Event scoping lives in the tree, not in EspUpdateRules</span>
+EspFilterHandle hEventFilter;
+EspCreateEventFilter(EVENT_PROP_TYPE, ESP_CMP_EQUAL,
+                      &amp;EVENT_TYPE_FILE_WRITE, &amp;hEventFilter);
+
+<span class="cm">// Compose the tree</span>
+EspFilterHandle hPathAndNotTmp, hWithSigner, hFinal;
+EspCreateAndFilter(hPathFilter, hNotTmp, &amp;hPathAndNotTmp);
+EspCreateAndFilter(hPathAndNotTmp, hSignerFilter, &amp;hWithSigner);
+EspCreateAndFilter(hWithSigner, hEventFilter, &amp;hFinal);
+
+<span class="cm">// Compile and install</span>
+EspRuleHandle hRule;
+EspCreateRule(hFinal, &amp;hRule);
+
+ESP_RULE_UPDATE_ENTRY entry = { .op = <span class="kw">1</span>, .rule = hRule };
+EspUpdateRules(hClient, ESP_RULE_UPDATE_FLAGS_NONE, <span class="kw">1</span>, &amp;entry);</code></pre>
+    <div class="tree">
+      <pre>                AND
+              /     \
+            AND      Event.Type == FileWrite
+          /     \
+        AND      Process.Signer != Microsoft
+       /   \
+File.Path   NOT
+startswith    \
+"...\System32\"  File.Extension == ".tmp"</pre>
+    </div>
+    <p>Write events reach your queue only when the path prefix matches, the extension isn't <code>.tmp</code>, and the signer check fails. The same skeleton composes over any of the leaf object types.</p>
+
+    <h3>A blocking rule</h3>
+    <p>The first example observes. This one denies: refuse to open any file whose hash appears in a blocklist, and report it as infected. It exercises the parts of the engine that make WESP more than a telemetry feed, namely kernel-side collection membership and the deny verdict.</p>
+    <p>Read the confidence markers carefully here. The filter tree, the collection mechanism, the event type, and the verdict mapping are all confirmed. <b>The path by which a client sets a rule's action is not</b>, as covered in <a href="#driver-gap">section 12</a>, so the action assignment below reflects the most likely reconciliation rather than a recovered signature.</p>
+    <pre><code><span class="cm">// 1. Push a blocklist into the kernel. Binary collection of file hashes.</span>
+EspCollectionHandle hBlocklist;
+EspCreateCollection(hClient, ESP_COLLECTION_TYPE_BINARY,
+                     ESP_LIFETIME_PERSISTENT, <span class="kw">0</span>, &amp;hBlocklist);
+EspUpdateCollection(hBlocklist, knownBadHashes, hashCount);
+
+<span class="cm">// 2. Leaf: this file's hash is in that collection.</span>
+<span class="cm">//    Binary value kind, so InCollection is ordinal 3.</span>
+EspFilterHandle hBadHash;
+EspCreateFileFilter(FILE_PROP_HASH, ESP_CMP_IN_COLLECTION,
+                     hBlocklist, &amp;hBadHash);
+
+<span class="cm">// 3. Leaf: scope to file-open events.</span>
+EspFilterHandle hOnOpen;
+EspCreateEventFilter(EVENT_PROP_TYPE, ESP_CMP_EQUAL,
+                      &amp;ESP_EVENT_TYPE_FO_OPEN, &amp;hOnOpen);
+
+<span class="cm">// 4. Compose.</span>
+EspFilterHandle hFinal;
+EspCreateAndFilter(hBadHash, hOnOpen, &amp;hFinal);
+
+<span class="cm">// 5. Compile with a deny action.</span>
+<span class="cm">//    INFERRED: action travels in the rule descriptor, not as a parameter.</span>
+ESP_RULE_DESC desc = {
+    .filter       = hFinal,
+    .event_type   = ESP_EVENT_TYPE_FO_OPEN,
+    .action       = ESP_ACTION_DENY_VIRUS_INFECTED,  <span class="cm">// verdict 0</span>
+    .enabled      = <span class="kw">TRUE</span>,
+    .is_top_level = <span class="kw">TRUE</span>,
+    .order_group  = <span class="kw">0</span>,
+    .lifetime     = ESP_LIFETIME_PERSISTENT,
+};
+
+EspRuleHandle hRule;
+EspCreateRule(&amp;desc, &amp;hRule);
+
+ESP_RULE_UPDATE_ENTRY entry = { .op = <span class="kw">1</span>, .rule = hRule };
+EspUpdateRules(hClient, ESP_RULE_UPDATE_FLAGS_NONE, <span class="kw">1</span>, &amp;entry);</code></pre>
+    <div class="tree">
+      <pre>              AND                         action: deny
+             /   \                       verdict 0 -> STATUS_VIRUS_INFECTED
+   File.Hash      Event.Type == FO_OPEN
+   in collection
+   (blocklist)</pre>
+    </div>
+    <p>On a match, <code class="mono">process_rules_with_current_thread_process</code> writes verdict 0 into the event structure, and <code class="mono">EspFsFilePreCreate</code> returns the corresponding entry from the deny table. The caller's <code class="mono">CreateFile</code> fails with <code>STATUS_VIRUS_INFECTED</code>, surfacing in Win32 as a virus-detected error. Choosing verdict 2 instead returns <code>STATUS_NOT_FOUND</code>, which makes the file appear absent rather than blocked, and verdicts 1, 3, and 4 return <code>STATUS_ACCESS_DENIED</code>.</p>
+    <p>Three properties of this rule are worth noting, because they're what a predicate language alone wouldn't give you. The blocklist lives in the kernel, so membership is tested in the I/O path with no round trip to your process. The decision is synchronous, so the file never opens rather than being reported after the fact. And with <code class="mono">ESP_LIFETIME_PERSISTENT</code>, both the collection and the rule survive a reboot, so protection resumes before your agent starts, which is the one part of the boot-coverage gap this design does address.</p>
+  </section>
+
+  <section id="security">
+    <div class="sec-head"><span class="sec-num">10</span><h2>Security considerations</h2></div>
+    <ul class="tight">
+      <li><b>Trust comes from the token, not the file.</b> The message dispatcher calls <code class="mono">PsReferencePrimaryToken</code> on the connecting process, then <code class="mono">AccessTokenHandle::query_security_attributes</code>, and feeds the result into <code class="mono">wesp_lib::capability::CapabilityTier</code> <span class="chip ok">confirmed</span>. Client trust is a claims check against the process token rather than an Authenticode check on the binary. That's a meaningfully different model from "is this file signed by Microsoft."</li>
+      <li><b>The gate is a token claim named <code class="mono">WESP://Permission</code></b> <span class="chip ok">confirmed</span>. The driver reads the connecting process's primary token and looks for that security attribute, which holds one of two 64-bit values rather than a boolean: <b>10000000</b> admits a caller without further requirements, and <b>1000000000</b> additionally requires the process to be an Antimalware protected process, verified through <code class="mono">ProcessProtectionInformation</code> against protection level <code class="mono">0x31</code> (see <a href="#credits">credits</a>). That is the concrete policy behind the <code class="mono">CapabilityTier</code> machinery this analysis found: a permission class, not a yes-or-no flag.</li>
+      <li><b>Test signing opens a development path.</b> On a test-signed preview build, an elevated process can connect with neither the <code class="mono">WESP://Permission</code> attribute nor Antimalware PPL. The port's own access control still applies. Treat this as a development affordance, and as a reason not to draw production conclusions from test-signed experiments.</li>
+      <li><b>Checks run per connection, not per message, and the connection object is the credential.</b> Token and protection checks happen when a connection to <code class="mono">\EspFilterPort</code> is established, including the short-lived connections used for registration, unregistration, and enumeration. The resulting <code class="mono">CapabilityTier</code> is stored in the pool block the connect callback returns as the filter manager's connection cookie. <code class="mono">message_notify_callback</code> then dereferences that cookie and dispatches, with no call to <code class="mono">PsGetCurrentProcess</code>, <code class="mono">PsReferencePrimaryToken</code>, or any protection query in the path <span class="chip ok">confirmed</span>. Later requests are checked for whether <em>that connection</em> is permitted the operation, which is what <code class="mono">ClientMessage::verify_capabilities</code> implements, never for who is making them. Since the connection is an ordinary file object, authority travels with the handle. See <a href="#attacks">section 13</a>.</li>
+      <li><b>The per-message capability check is coarse.</b> <code class="mono">CapabilityTier::verify_property_query</code> reads as <code class="mono">if (tier != 0) return jumptable[query.kind](...); return 8;</code>. Tier 0 is denied outright, and that comparison is the only test against the tier value in the function. The dispatch table has 15 arms for 15 property-query kinds, each walking the requested property list and rejecting on the first element that fails that kind's validity predicate.</li>
+      <li><b>Registration persists.</b> Client identity records survive a reboot through <code class="mono">PersistedStore</code>, which makes them a forensic artifact worth locating on a live system. It shows what has ever registered, not only what's connected now. Its location, format, and protection are covered below.</li>
+      <li><b>A malicious client's reach depends on an unsettled question.</b> The driver enforces, and the rule descriptor carries a client-supplied action ordinal (<a href="#lifecycle">section 4</a>). Whether a third-party client may set a <em>deny</em> ordinal is <span class="chip gap">not recovered</span>. If it can, a hostile registration isn't just a visibility problem, it's a denial-of-service primitive against arbitrary file, process, and registry operations expressible as a rule. Model both cases.</li>
+      <li><b>Built-in observability cuts both ways.</b> Every <code>Esp*</code> call logs to the <code>WespClientProvider</code> ETW provider. That's a ready-made monitoring point for defenders, and it also means any client's usage pattern is visible to anything else consuming the provider.</li>
+      <li><b>The port is access-controlled, and capped.</b> It's created with <code class="mono">FltBuildDefaultSecurityDescriptor(&amp;sd, FLT_PORT_ALL_ACCESS)</code>, which restricts access to Administrators and SYSTEM, and with a maximum of <b>512 concurrent connections</b> (see <a href="#credits">credits</a>). The connect callback then applies the token checks above, so the ACL is the first of two gates rather than the only one.</li>
+      <li><b>Altitude gates participation.</b> Clients register with an altitude, the same load-order concept minifilters use. Expect altitude allocation to be a prerequisite for shipping on this platform, as it is for minifilters today.</li>
+    </ul>
+
+    <h3>Client identity is a bearer GUID</h3>
+    <p>Once a caller is through the connection gate, <b>a client GUID is the only thing identifying a client, and cross-client operations are not scoped to the caller</b>. Five pieces of evidence converge.</p>
+    <ul class="tight">
+      <li><code class="mono">RegisteredClients::find_by_id</code>, which the connect handler calls to resolve a client, compares the 16 GUID bytes and a liveness state byte. It performs no comparison against the calling process, token, or any owner field <span class="chip ok">confirmed</span>.</li>
+      <li><code class="mono">EspUnregisterClient</code> doesn't use an established connection. It builds a 20-byte context of <code class="mono">{opcode 2, target GUID}</code> and opens a <em>fresh</em> connection to <code class="mono">\EspFilterPort</code>, then closes it. There is no handle to prove prior ownership and none is requested <span class="chip ok">confirmed</span>.</li>
+      <li>The driver does maintain a per-process association, <code class="mono">ConnectedClientProcesses</code>, mapping a process to the set of client GUIDs it has connected. That's a real ownership primitive, but it isn't used as one. Its lookup, <code class="mono">contains_client</code>, has exactly one code cross-reference in the entire driver, from a boolean-property reader inside <code class="mono">event::args::process::ProcessArgument</code>. It answers a <em>rule predicate</em>, letting a rule match on whether the subject process is itself a WESP client. It is telemetry, not authorization <span class="chip ok">confirmed</span>.</li>
+      <li>A symbol sweep for ownership-check primitives turns up nothing applicable. The only owner-related routines in the driver, <code class="mono">ThreadArgument::owning_process</code>, <code class="mono">AccessTokenHandle::owner_sid</code>, and the security-descriptor owner accessor, all read properties of the <em>event subject</em> for rule evaluation. None compares a caller against a client record <span class="chip ok">confirmed</span>.</li>
+      <li>The published proof-of-concept unregisters a client from a separate process invocation than the one that registered it, and it works (see <a href="#credits">credits</a>). Any per-process ownership check would break that supported workflow.</li>
+    </ul>
+    <p>Because <code class="mono">EspEnumerateRegisteredClients</code> hands out the GUIDs, the sequence is simply enumerate, then act. <code class="mono">EspConnectClient</code> likewise takes a bare GUID, so obtaining a management handle for another vendor's client follows the same path, and from there <code class="mono">EspRemoveRulesForClient</code> and <code class="mono">EspRemoveAllRulesForClient</code> operate on that handle.</p>
+    <div class="callout">
+      <b>Why this matters, and what it doesn't mean.</b> This is not privilege escalation. Reaching the port already requires Administrator or SYSTEM, and the <code class="mono">WESP://Permission</code> claim can only be placed on a token with roughly SYSTEM-level privilege in the first place. What it changes is what an attacker who already holds that position, <em>or a malicious client holding the lower permission class</em>, can do to <em>other</em> security products. Unregistering a competitor's consumer is a supported API call that touches neither their process, their files, nor their driver, and <b>unregistration is persisted</b>, so the effect survives a reboot. An agent blinded this way may keep running and look healthy while receiving nothing. Compared with killing a protected process, it is quieter, more durable, and leaves different forensic traces.
+    </div>
+    <p>The mitigation available to a vendor today is to treat its own registration as monitored state: enumerate periodically, watch the <code>WespClientProvider</code> ETW provider for unregistration activity, and re-register on loss. A platform-side fix would bind a registration to the identity that created it, or require the management connection to prove possession of something other than a value the API itself publishes.</p>
+
+    <h3>Queue backpressure as an evasion primitive</h3>
+    <p>The flow-control design in <a href="#lifecycle">section 4</a> has a security consequence worth stating directly: <b>flooding a client's queue can create a window in which real detections are dropped.</b> The mechanism is confirmed; treat the exploitability assessment as reasoned rather than tested, since no dynamic analysis was performed.</p>
+    <p>Four properties combine badly.</p>
+    <ul class="tight">
+      <li><b>The budget is fixed at creation.</b> <code class="mono">MaxCapacityBytes</code> is set in <code class="mono">EspCreateEventQueue</code>, and no export raises it afterward <span class="chip ok">confirmed</span>. A client under pressure can drain faster, but it can't grow its own headroom.</li>
+      <li><b>Events come from ordinary, unprivileged activity.</b> File opens, registry queries, and thread creation are what the catalog covers, and any process can issue them in a tight loop. An attacker doesn't need privilege to generate matching events, only to guess or infer what the victim's rules match. Broad rules such as "all process creation" or "writes under this directory" are both common and easy to trigger.</li>
+      <li><b>Over budget means not delivered.</b> The enqueue path returns a distinct over-budget status and the notification isn't queued <span class="chip ok">confirmed</span>. The operation still happens; the client just never hears about it.</li>
+      <li><b>No lost-event counter surfaced.</b> Searching the driver for dropped, lost, missed, or overflow counters found nothing beyond Rust's allocator panic path <span class="chip ok">confirmed</span>. The state-change callback reports memory thresholds, not how many events were discarded. A client can tell it's under pressure. Whether it can tell precisely what it missed is <span class="chip gap">not recovered</span>.</li>
+    </ul>
+    <p>The economics favor the attacker. A flooding thread pays one syscall per event and, because rule matching is synchronous, absorbs the rule-evaluation cost on its own thread. The victim pays event construction, queue insertion, an IPC hop, and user-mode processing for every event that matches. That asymmetry is amplification, and the self-throttling effect on the attacker is easily offset by using more threads.</p>
+    <p>Two structural aggravations. Budgets are per client, so one client's flood can't starve another, but a single burst of system activity hits <em>every</em> client at once because they all observe the same events. And a client has no way to tell the kernel to slow down, because the producer is the operating system servicing another process's work.</p>
+    <div class="callout">
+      <b>Why this matters more here than for a driver.</b> A vendor driver evaluating inline has no delivery window to miss: it reaches a verdict before the operation completes. WESP's asynchronous, lossy delivery introduces a gap that didn't previously exist, and load shedding is the client's responsibility. The practical mitigation is to treat sustained watermark crossings as an alert in their own right. Being flooded is itself a signal, and a client that logs threshold transitions turns an evasion attempt into a detection.
+    </div>
+
+    <h3>The persisted store</h3>
+    <p>Registrations, rules, collections, and event-queue definitions survive reboots. That store is in the <b>registry</b>, not on disk <span class="chip ok">confirmed</span>. The <code class="mono">wesp_lib::persistence::registry</code> module wraps key and value operations (<code class="mono">create_key</code>, <code class="mono">delete_key_recursive</code>, <code class="mono">enumerate_subkey</code>, <code class="mono">read_binary_value</code>, <code class="mono">read_string_value</code>, <code class="mono">set_dword_value</code>, <code class="mono">set_qword_value</code>, <code class="mono">set_string_value</code>), and the driver imports the matching <code class="mono">Zw*</code> registry APIs.</p>
+
+    <h4>Layout</h4>
+    <p>The path builders in <code class="mono">PersistedStore</code> compose a fixed hierarchy from string constants. Decoding those constants and matching them to the lengths each builder passes pins the structure exactly: <code>PersistedStore</code>, <code>Clients</code> (length 7), and <code>Collections</code> (length 11) sit at the addresses the builders reference.</p>
+    <p>The absolute anchor is the driver's own service key <span class="chip ok">confirmed</span>. Three related literals appear in the binary:</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Literal</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">\Registry\Machine\System\CurrentControlSet\Services\Wesp</td><td>The service key the store hangs from</td></tr>
+          <tr><td class="mono">\Registry\Machine\System\ControlSet*{0}\Services\Wesp\PersistedStore*</td><td>A wildcard pattern covering the store across every control set, including a format placeholder</td></tr>
+          <tr><td class="mono">\Registry\Machine\System\Wesp\Policy</td><td>A separate policy key, outside <code>Services</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>So the store resolves to <code class="mono">\Registry\Machine\System\CurrentControlSet\Services\Wesp\PersistedStore\</code>, and the hierarchy beneath it is:</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Key path</th><th>Keyed by</th><th>Values</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">&hellip;\PersistedStore\Clients\&lt;ClientGuid&gt;</td><td>Client GUID</td><td class="mono">client_name, altitude</td></tr>
+          <tr><td class="mono">&hellip;\Collections\&lt;CollectionGuid&gt;</td><td>Collection GUID</td><td class="mono">collection_type</td></tr>
+          <tr><td class="mono">&hellip;\EventQueues\&lt;QueueGuid&gt;</td><td>Queue GUID</td><td class="mono">queue_type, max_capacity_bytes, notification_version</td></tr>
+          <tr><td class="mono">&hellip;\Rules\&lt;RuleGuid&gt;</td><td>Rule GUID</td><td class="mono">version, event_type, lifetime, order_group, enabled, flags, is_top_level, action, filter, subrules, notification, context_key_updates, modify</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>GUIDs become key names through <code class="mono">registry::guid_to_string</code> and parse back through <code class="mono">string_to_guid</code>. Paths are assembled by <code class="mono">registry::safe_join_path</code>, whose name suggests traversal-safe concatenation.</p>
+    <p>The wildcard pattern is worth noting on its own. The driver holds a path pattern matching its own store across <code>ControlSet001</code>, <code>ControlSet002</code>, and <code>CurrentControlSet</code>, which implies it recognizes registry operations against its own persistence, most plausibly to special-case them in the event stream or to guard them <span class="chip inf">inferred</span>.</p>
+    <p>The persisted rule schema is more capable than the client API suggests. Alongside <code class="mono">filter</code>, a rule carries an <code class="mono">action</code>, an <code class="mono">enabled</code> flag, an <code class="mono">order_group</code>, an <code class="mono">is_top_level</code> marker, and <code class="mono">subrules</code>. Rules therefore nest and are evaluated in a defined order rather than as a flat set. Two assertion strings name concrete action values: <code class="mono">MatchSubrules</code>, used when a rule delegates to children, and <code class="mono">ForceAllow</code>, described in the driver's own message as "an internal action and should not be persisted" <span class="chip ok">confirmed</span>. See <a href="#driver-gap">section 12</a> for what that implies about enforcement.</p>
+
+    <h4>Formatting</h4>
+    <p>Scalars are stored natively as registry values: strings for <code class="mono">client_name</code> and <code class="mono">altitude</code>, DWORDs and QWORDs for type and capacity fields. Structured data is stored as binary values and parsed back through typed schemas, including <code class="mono">wesp_api_types::schema::filter::StoredPredicate</code>, <code class="mono">schema::collection::StoredCollectionData</code>, <code class="mono">StoredCollectionRegion</code>, and <code class="mono">CollectionSchema</code>. Collection payloads are written in regions by <code class="mono">persistence::collection::persist_collection_data_regions</code>.</p>
+    <p>Writes are <b>transactional</b> <span class="chip ok">confirmed</span>. <code class="mono">persistence::transaction::StoreTransaction</code> exposes <code class="mono">persist</code>, <code class="mono">commit</code>, <code class="mono">delete</code>, and <code class="mono">ensure_category_key</code>, backed by <code class="mono">ZwCreateRegistryTransaction</code>, <code class="mono">ZwCommitRegistryTransaction</code>, and <code class="mono">ZwRollbackRegistryTransaction</code>. Multi-key updates are atomic, so a crash mid-update won't leave torn state.</p>
+
+    <h4>Protection</h4>
+    <p><b>The store is actively defended, and not by a registry ACL.</b> The driver sets no security descriptor of its own: it imports no <code class="mono">ZwSetSecurityObject</code>, no <code class="mono">RtlCreateSecurityDescriptor</code>, and no <code class="mono">SeAccessCheck</code>, and its only security imports are the <em>query</em> forms serving object properties <span class="chip ok">confirmed</span>. On a static read that suggests the keys inherit ordinary service-key permissions and are freely readable by an administrator. <b>That inference is wrong.</b> Published testing shows a SYSTEM prompt running as a WinTcb protected process still receives access denied when opening the key directly (see <a href="#credits">credits</a>).</p>
+    <p>The mechanism is almost certainly the driver's own registry callback. WESP registers <code class="mono">CmRegisterCallbackEx</code>, and it holds a path pattern matching its own store across every control set, <code class="mono">\Registry\Machine\System\ControlSet*{0}\Services\Wesp\PersistedStore*</code> <span class="chip ok">confirmed</span>. A registry callback that matches that pattern and denies the operation explains an access denial that no ACL accounts for <span class="chip inf">inferred</span>. WESP protects its persistence the same way it observes everything else, through its own callback rather than through object security.</p>
+    <p>Consequences, revised accordingly.</p>
+    <ul class="tight">
+      <li><b>It is not a soft enumeration target.</b> Reading the list of registered clients, their altitudes, rules, and queue configuration through the registry is blocked even at SYSTEM with PPL. The supported path is the client API, which is itself gated (see the connection checks above).</li>
+      <li><b>Blinding a client by deleting its rule keys is not the easy win it appears to be.</b> The same callback that blocks reads stands in front of writes and deletes. Any attempt to disable detection this way has to defeat the callback first, which is a meaningfully higher bar than editing a registry key.</li>
+      <li><b>It remains kernel-reachable parser input, in principle.</b> The driver reads these binary values back through typed schemas with explicit conversion-error handling. If the callback protection can be bypassed or is not applied on every path, whoever writes those keys controls bytes a kernel component parses. Rust's memory safety reduces the severity, and this is now a second-order concern rather than a first-order one.</li>
+    </ul>
+    <p>The broader lesson generalizes past this component: absence of security-descriptor APIs in an import table is not evidence that an object is unprotected, because a driver that already owns a callback surface can enforce access there instead.</p>
+  </section>
+
+  <section id="implications">
+    <div class="sec-head"><span class="sec-num">11</span><h2>What this means for vendors</h2></div>
+    <p>If you adopt WESP, you take on building and maintaining a rule compiler: your detection policy becomes a filter tree, then capability-checked API calls, then a wire format. This isn't speculative. The evidence sits in Microsoft's own client code.</p>
+    <ul class="tight">
+      <li>The public <code class="mono">FilterType</code> enum and the internal Rust discriminant are separate numbering schemes bridged by a remap table. A third scheme, <code class="mono">_ESP_PROPERTY_QUERY_TYPE</code>, numbers the same objects differently again. Microsoft needed translation seams between its own layers, so you'll need one between your policy language and this ABI.</li>
+      <li>Compiling a rule resolves typed bindings per referenced object kind, not just tree shape. That's real work, not a formality.</li>
+      <li>Capability negotiation makes static code generation insufficient. Properties and event capabilities are versioned per build, so your translator needs runtime probing and a fallback strategy: drop a clause, widen a filter, or fall back to client-side filtering on a broader subscription.</li>
+      <li>Flow control is your responsibility. You choose <code class="mono">MaxCapacityBytes</code> and the watermark thresholds, and you lose events if you ignore the warnings.</li>
+    </ul>
+    <p>Treat the translation layer as a first-class component with its own test matrix across Windows builds. It's the same category of investment as maintaining ETW manifest compatibility or WFP filter-condition mappings, not a thin shim.</p>
+    <p>Before you plan around WESP, read <a href="#driver-gap">section 12</a>. It covers the capabilities this platform doesn't replace, several of which decide whether you can retire a driver or only shrink one.</p>
+  </section>
+
+  <section id="driver-gap">
+    <div class="sec-head"><span class="sec-num">12</span><h2>What you still need a driver for</h2></div>
+    <p class="lede">WESP covers file, process, thread, registry, and handle telemetry well. It doesn't cover everything a security product does, and several of the gaps are structural rather than unfinished features.</p>
+    <p>The distinction that decides your architecture: <b>WESP is a telemetry, policy-matching, and enforcement platform, but not a response platform.</b> The driver can deny an operation. What no part of the API does is act after the fact. Everything below is checked against the export list, the import table, and the event catalog rather than assumed.</p>
+
+    <h3>Response and remediation</h3>
+    <p>This is the largest gap, and the easiest to overlook because it isn't a missing feature so much as a missing category. Detection is only half of what an EDR product does. The other half is acting on what it finds.</p>
+    <p><b>No exported function performs an action</b> <span class="chip ok">confirmed</span>. Across roughly 120 exports, every one registers, connects, queries, describes, filters, or configures. None terminate, suspend, quarantine, or modify anything outside WESP's own object model. The driver's imports agree: there's no <code class="mono">ZwTerminateProcess</code>, no process or thread suspension, and no file deletion. <code class="mono">PsTerminateSystemThread</code> manages the driver's own worker threads, and the <code class="mono">ZwDeleteKey</code> and <code class="mono">ZwDeleteValueKey</code> imports serve its persistence store.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Response action</th><th>Available through WESP</th><th>Where it has to come from</th></tr></thead>
+        <tbody>
+          <tr><td>Terminate a malicious process</td><td>No</td><td>User-mode <code class="mono">TerminateProcess</code>, or your own driver</td></tr>
+          <tr><td>Suspend a process or thread pending verdict</td><td>No</td><td>Your own driver</td></tr>
+          <tr><td>Quarantine, delete, or rename a file</td><td>No</td><td>User-mode file APIs, or your own minifilter</td></tr>
+          <tr><td>Roll back changes made by a threat</td><td>No</td><td>Your own component</td></tr>
+          <tr><td>Isolate the host from the network</td><td>No</td><td>WFP, firewall policy</td></tr>
+          <tr><td>Revoke an already-granted handle</td><td>No</td><td>Your own driver</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>A user-mode agent can still perform some of these with ordinary Win32 APIs. The difference is that it does so without kernel assistance, after the fact, racing whatever it's trying to stop, and subject to the target's own defenses. That's a meaningfully weaker position than a driver acting at the callback.</p>
+
+    <h3>Enforcement at the callback</h3>
+    <p>This is the one item on the list whose status changed under investigation, so state it precisely. <b>The driver enforces.</b> <code class="mono">EspFsFilePreCreate</code> returns a verdict from a deny table that includes <code>STATUS_VIRUS_INFECTED</code>, <code>STATUS_ACCESS_DENIED</code>, and <code>STATUS_NOT_FOUND</code>, selected by rule processing (<a href="#lifecycle">section 4</a>). The same capability exists on other paths: <code class="mono">PsSetCreateProcessNotifyRoutineEx2</code> and <code class="mono">ObRegisterCallbacks</code> can both deny or downgrade, and neither needs the filter-manager pending import.</p>
+    <p><b>Clients do set the action, and it travels in the rule descriptor</b> <span class="chip ok">confirmed</span>. A public proof-of-concept (see <a href="#credits">credits</a>) declares the structure <code class="mono">EspCreateRule</code> consumes, and it ends with exactly the two fields this analysis predicted:</p>
+    <pre><code><span class="kw">struct</span> RuleDescriptor {
+    GUID          id;
+    uint64_t      order_group;   <span class="cm">// default 100</span>
+    uint32_t      lifetime;
+    <span class="cm">/* ... reserved ... */</span>
+    uint32_t      event_type;
+    <span class="kw">const</span> <span class="kw">void</span>*  event_config;
+    uint32_t      modification;
+    uint32_t      action;        <span class="cm">// the action ordinal</span>
+    <span class="kw">void</span>*         action_object; <span class="cm">// the action's payload</span>
+};</code></pre>
+    <p>That settles the structural question. <code class="mono">action</code> is a client-supplied ordinal, and <code class="mono">action_object</code> is its payload, matching the per-variant payloads recovered from <code class="mono">drop_in_place&lt;RuleAction&gt;</code> in <a href="#filters">section 6</a>. The proof-of-concept uses <code class="mono">action = 1</code> with an event queue as the object, which is the routing case.</p>
+    <p>What stays open is narrower: <b>which action ordinals a third-party client may legally set</b>. No public example uses a verdict action, and <code class="mono">ForceAllow</code> is explicitly internal, so whether the deny ordinals are reachable from an unprivileged or merely-registered client is <span class="chip gap">not recovered</span>. Plan for your own enforcement until that's established, and treat WESP-side denial as upside.</p>
+    <p>Plan accordingly: the mechanism is present and the ordinal is client-supplied, but until the permitted set is established, don't architect around WESP-side denial as your primary enforcement.</p>
+
+    <h3>Telemetry sources the catalog doesn't include</h3>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Source</th><th>Evidence of absence</th><th>What it costs you</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>Network</b></td>
+            <td>Mixed. The driver has zero <code class="mono">Fwp*</code>, <code class="mono">Ndis*</code>, <code class="mono">Tcp*</code>, or <code class="mono">Ip*</code> imports and no network events <span class="chip ok">confirmed</span>. But the <em>rule model</em> includes a network-endpoint object type with IP and port properties, plus <code class="mono">IpAddress</code> and <code class="mono">Port</code> comparison kinds (<a href="#filters">section 6</a>)</td>
+            <td>Connection telemetry, DNS and TLS inspection, C2 detection, and host isolation still need WFP. The schema is ahead of the data sources: you can express a predicate about an endpoint, but nothing feeds it except remote-file context.</td>
+          </tr>
+          <tr>
+            <td><b>Memory operations</b></td>
+            <td>No allocation, protection-change, or cross-process write events in the catalog <span class="chip ok">confirmed</span></td>
+            <td>Injection, hollowing, and shellcode detection. <code class="mono">ObHandleCreate</code> and <code class="mono">ObHandleDuplicate</code> show you a handle was acquired, not what was done with it.</td>
+          </tr>
+          <tr>
+            <td><b>Devices and removable media</b></td>
+            <td>No PnP notification registration. Device imports are read-only descriptors: <code class="mono">IoGetDevicePropertyData</code>, <code class="mono">IoVolumeDeviceToDosName</code>, <code class="mono">FltGetDiskDeviceObject</code> <span class="chip ok">confirmed</span></td>
+            <td>USB arrival and device-control policy, a standard DLP feature. Volume mount and dismount events give you a filesystem-level view only.</td>
+          </tr>
+          <tr>
+            <td><b>Script and scan content</b></td>
+            <td>No AMSI integration, and no content-bearing API <span class="chip ok">confirmed</span></td>
+            <td>Script-body inspection for PowerShell, JScript, VBA, and Office macros.</td>
+          </tr>
+          <tr>
+            <td><b>Kernel-mode surface</b></td>
+            <td>No driver-load or kernel-module events distinct from <code class="mono">ProcessLoadImage</code>, and no kernel object inspection <span class="chip ok">confirmed</span></td>
+            <td>Rootkit hunting and driver-integrity checks that rely on reading kernel structures directly.</td>
+          </tr>
+          <tr>
+            <td><b>Early boot</b></td>
+            <td>Partial. An <code class="mono">ESP_EVENT_TYPE_BOOT_LOAD_DRIVER</code> event type exists, so boot driver loads <em>are</em> modeled <span class="chip ok">confirmed</span></td>
+            <td>The telemetry exists, but a user-mode client can't run before user mode does. Expect boot events to arrive retrospectively rather than as a live evaluation gate, which is the part ELAM provides.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>One clarification on ETW. Threat-intelligence telemetry from the <code>Microsoft-Windows-Threat-Intelligence</code> provider stays available to a protected user-mode process independently of WESP. WESP neither provides it nor takes it away, so treat those as parallel sources rather than one replacing the other.</p>
+
+    <h3>Fidelity of what you do receive</h3>
+    <p>Two limits shape what you can conclude from an event.</p>
+    <ul class="tight">
+      <li><b>No content, only properties.</b> The driver inspects content itself. It imports <code class="mono">MmMapViewInSystemSpace</code>, <code class="mono">ZwQueryVirtualMemory</code>, and <code class="mono">MmDoesFileHaveUserWritableReferences</code>, and feeds Defender's scan path through <code class="mono">MpReportPostRead</code> and <code class="mono">MpReportPostWrite</code>. No client API returns bytes. You can't run your own scanner, YARA rules, or unpacker on the data the event describes. Whether a content hash is among the unnamed file properties is <span class="chip gap">not recovered</span>.</li>
+      <li><b>No call stacks.</b> The only stack-related import is <code class="mono">IoGetStackLimits</code>, a bounds check, with no <code class="mono">RtlWalkFrameChain</code> or <code class="mono">RtlCaptureStackBackTrace</code> <span class="chip ok">confirmed</span>. You lose caller attribution, which modern detection leans on heavily to distinguish a legitimate API use from the same call issued by injected code.</li>
+    </ul>
+    <p>What the model does carry is better than the naming gap suggests. Process ancestry is modeled through <code class="mono">RelatedObjectCollection::collect_process_chain</code>, command line is available through <code class="mono">PsProcessApi::command_line</code>, image signature level through <code class="mono">PsGetProcessSignatureLevel</code>, and token privileges through a dedicated <code class="mono">TokenPrivilegesComparison</code> kind <span class="chip ok">confirmed</span>. For behavioral rules over process lineage and identity, the data is there.</p>
+
+    <h3>Assurance and operational properties</h3>
+    <ul class="tight">
+      <li><b>Self-protection is uncertain, not impossible.</b> Defending your own processes, files, and registry keys depends on a deny action being reachable from a third-party rule, which is exactly the open question above. If it isn't, tamper resistance has to come from elsewhere, such as protected-process status. A driver-based product defends itself with the same callbacks it uses to detect, and doesn't have to wait on a policy decision to find out whether it can.</li>
+      <li><b>Your agent is an ordinary process.</b> If it's killed or crashes, observation stops. A driver keeps running and can restart its user-mode half. The persisted registration means the driver remembers you, not that it covers for you.</li>
+      <li><b>Delivery is lossy by design.</b> Past your configured capacity, notifications are dropped. Watermark callbacks warn you first, but shedding load is your responsibility, and a gap in telemetry is a gap in detection. A driver that owns its own queue chooses its own failure mode.</li>
+      <li><b>Ordering between vendors is Microsoft's to assign.</b> Altitude decides who sees an event first, the same way it does for minifilters, so your position in the stack is allocated rather than chosen.</li>
+    </ul>
+
+    <h3>The expressiveness ceiling</h3>
+    <p>This is the trade underneath all the others. Your driver runs arbitrary code when an event fires. WESP gives you a fixed predicate language: boolean composition over typed properties, wildcard string matching, numeric and bitwise comparisons, and collection membership. There's no arithmetic, no regular expressions, no custom hashing, and no callback into your code.</p>
+    <p>Anything the language can't express has to be evaluated in your process after the event is delivered. That costs an IPC hop and lands after the operation has already completed. Collections soften this by letting you push an allow-list or deny-list into the kernel for in-path evaluation, which is a genuine kernel-side cache. What you can't do is compute a verdict during the event and write it back.</p>
+
+    <div class="callout">
+      <b>What you get in exchange.</b> No kernel code to write, test, or sign. No bugcheck liability. No attestation cycle per update, no IRQL correctness to get right, and no driver to service when a callback contract changes. If your product is largely file and process telemetry with policy matching, that's a strong trade. If it blocks, responds, inspects network traffic, or reasons about call stacks, WESP in this form shrinks your driver rather than removing it, and you should plan for a hybrid.
+    </div>
+  </section>
+
+  <section id="attacks">
+    <div class="sec-head"><span class="sec-num">13</span><h2>How a WESP-based agent gets defeated</h2></div>
+    <p class="lede">The preceding sections are organized by subsystem. This one re-indexes the same findings by attack, because that's how you'll need them when you threat-model a product built on this platform. Most entries point back to evidence established earlier; the handle-theft entry is analyzed here for the first time, since it only becomes visible once the connection lifecycle and the capability model are considered together.</p>
+    <p>Assume throughout that the attacker has already reached Administrator or SYSTEM, since that's the floor for touching <code class="mono">\EspFilterPort</code> at all. The question these entries answer is what that position buys against a <em>WESP-based defender specifically</em>, compared with what it buys against a driver-based one.</p>
+
+    <h3>Blind it: unregister the consumer</h3>
+    <p><b>Cost: one enumerate call and one unregister call. Persistence: survives reboot.</b></p>
+    <p>Client identity is a bearer GUID, and no cross-client operation is scoped to the caller (<a href="#security">section 10</a>). <code class="mono">EspEnumerateRegisteredClients</code> publishes every registered GUID; <code class="mono">EspUnregisterClient</code> accepts any of them over a fresh connection with no proof of ownership. The same bearer property extends to <code class="mono">EspConnectClient</code>, so <code class="mono">EspRemoveAllRulesForClient</code> offers a quieter variant: leave the registration standing and strip its rules, so the agent still appears registered.</p>
+    <p>What makes this the strongest entry on the list is what it <em>doesn't</em> touch. No write to the victim's process, no file modified, no driver unloaded, no service stopped. The victim's protected-process status is irrelevant because nothing touches the victim. The agent keeps running, its health checks keep passing, and it receives nothing.</p>
+    <p><b>Detection.</b> Treat your own registration as monitored state. Enumerate on a timer and compare against what you registered; watch the <code>WespClientProvider</code> ETW provider for unregistration and rule-removal activity naming your GUID. Re-register on loss, and alert on the loss itself rather than silently recovering, because a successful unregister means something already holds the privilege to repeat it.</p>
+
+    <h3>Starve it: flood the queue</h3>
+    <p><b>Cost: unprivileged. Persistence: only while sustained.</b></p>
+    <p>Delivery is asynchronous and lossy past a capacity fixed at queue creation (<a href="#security">section 10</a>). Because the events come from ordinary file, registry, and thread activity, the flood needs no privilege at all, only knowledge of what the victim's rules match. Broad subscriptions are both common and easy to guess.</p>
+    <p>This is the one entry where the attacker's required position is <em>lower</em> than the rest of the list. It doesn't blind the agent outright; it opens a window, and the real action is scheduled inside that window.</p>
+    <p><b>Detection.</b> Log every watermark transition as a security event rather than a performance metric. A client that treats sustained backpressure as an alert converts the evasion attempt into a detection, which is the one mitigation available without platform changes. The absence of a lost-event counter (<span class="chip gap">not recovered</span>) means you can report that you were flooded but probably not enumerate what you missed.</p>
+
+    <h3>Evade it: stay outside the predicate language</h3>
+    <p><b>Cost: none beyond technique selection. Persistence: inherent.</b></p>
+    <p>Several categories are structurally invisible rather than merely unimplemented (<a href="#driver-gap">section 12</a>). Memory operations have no events, so injection, hollowing, and shellcode execution produce nothing directly; a handle open is visible, what's done through the handle is not. There are no call stacks, so an API call issued by injected code is indistinguishable from the same call issued legitimately. There's no content access, so no scanning, no hashing of your choosing, no unpacking. There's no network telemetry despite the schema carrying IP and port properties, so C2 traffic is unobserved.</p>
+    <p>Within the language, the ceiling itself is an evasion surface: no arithmetic, no regular expressions, no custom hashing, no callback into vendor code. Anything a rule can't express has to be evaluated after delivery, which means after the operation completed.</p>
+    <p><b>Detection.</b> This is the category that decides whether you can retire a driver. Everything listed here needs a source WESP doesn't provide, whether that's your own driver, WFP, AMSI, or the threat-intelligence ETW provider, which stays available to a protected process independently of WESP.</p>
+
+    <h3>Outrun it: act before the client exists</h3>
+    <p><b>Cost: requires boot-path persistence. Persistence: inherent to the window.</b></p>
+    <p>Boot driver loads are modeled as an event type, so the telemetry exists (<a href="#driver-gap">section 12</a>). What can't exist is a user-mode consumer running before user mode does. Expect boot events retrospectively rather than as a live gate, which is precisely the interval ELAM was built to cover. The same reasoning applies to the agent's own start and to any interval in which it crashed, was killed, or hadn't reconnected.</p>
+    <p><b>Detection.</b> Process boot events as a reconstruction pass at startup rather than assuming live coverage, and reconcile against what you'd expect to have seen. Treat unexplained gaps in your own event stream as adversarial until shown otherwise.</p>
+
+    <h3>Steal it: duplicate the port handle</h3>
+    <p><b>Cost: <code class="mono">PROCESS_DUP_HANDLE</code> on a consumer. Persistence: outlives the victim process.</b></p>
+    <p>A connection to <code class="mono">\EspFilterPort</code> is an ordinary file object, and <b>the connection object is the credential</b>. The connect callback allocates a small pool block holding the connection state, the driver state, and the client port, and returns it as the filter manager's <code class="mono">ConnectionPortCookie</code>. The <code class="mono">CapabilityTier</code> derived from the connecting process's token is resolved once, at that moment, and stored there <span class="chip ok">confirmed</span>.</p>
+    <p>The message path then never revisits it. Decompiled, <code class="mono">message_notify_callback</code> reduces to: take the cookie, dereference it to the connection state, probe the input and output buffers, and dispatch through a jump table indexed by the stored state's discriminant. There is <b>no <code class="mono">PsGetCurrentProcess</code>, no <code class="mono">PsReferencePrimaryToken</code>, and no protection check</b> anywhere in that path <span class="chip ok">confirmed</span>. "Per connection, not per message" is literal rather than a simplification: whoever holds the handle inherits the tier that was computed for whoever opened it.</p>
+    <p><b>The session also outlives its owner.</b> Teardown is bound to the port, not the process. <code class="mono">ConnectedClientProcesses::remove</code> has exactly one caller, <code class="mono">ClientManager::disconnect_client</code>, and that function has no code cross-references at all, only a <code>.pdata</code> entry. It is reachable solely through the filter manager's disconnect notification, which fires when the client port closes, meaning when the last reference to the file object is released <span class="chip ok">confirmed</span>. No cleanup hangs off process exit. Duplicate the handle, then terminate the consumer, and the connection survives in the new process while <code class="mono">ConnectedClientProcesses</code> still attributes it to the dead one.</p>
+    <p>What makes this more than a lateral move is its effect on the admission gate. Reaching the port needs Administrator or SYSTEM, but being <em>admitted</em> needs the <code class="mono">WESP://Permission</code> claim, and placing that attribute on a token requires roughly SYSTEM-level privilege. Stealing a handle skips the connect path entirely, so a caller who cannot obtain the claim can still operate a fully authorized WESP connection <span class="chip inf">inferred</span>. The mechanism is confirmed; the duplication itself is reasoned from it, since no dynamic analysis was performed.</p>
+    <p>Exploitability turns on which permission class the victim holds.</p>
+    <div class="twrap">
+      <table>
+        <thead><tr><th>Victim's permission class</th><th>Antimalware PPL required</th><th>Handle reachable by an administrator</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1000000000</td><td>Yes</td><td>No. PPL denies <code class="mono">PROCESS_DUP_HANDLE</code> to unprotected callers</td></tr>
+          <tr><td class="mono">10000000</td><td>No</td><td><b>Yes.</b> An ordinary process, open to ordinary handle theft</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The lower class is the soft target, and it's the one a vendor would plausibly choose for a component that doesn't otherwise need protected-process status. A consumer that takes the cheaper class becomes a credential store for its own WESP access.</p>
+    <p>One practical note, since it affects how much work this is. The <code class="mono">Esp*</code> exports take a user-mode client structure rather than the raw handle, so an attacker either reimplements the wire protocol or fabricates a structure carrying the stolen handle at offset <code class="mono">0x10</code>, which is where <code class="mono">EspRsSendRemoveAllClientRules</code> reads it from. Neither is a meaningful obstacle.</p>
+    <p><b>Detection.</b> If your consumer isn't Antimalware PPL, treat its WESP handle as a secret with the same care as a private key, and assume any process that can open yours with <code class="mono">PROCESS_DUP_HANDLE</code> owns your platform access. Protected-process status is the mitigation that actually closes this, which is an argument for the higher permission class independent of what its extra capabilities buy you. Message dispatch emits an ETW activity on the client provider, so a stolen connection still produces provider traffic, though it appears under the borrowing process rather than the registered one. A platform-side fix would re-derive the tier from the calling process at message time instead of trusting the cookie.</p>
+
+    <h3>Impersonate it: the gate is a token claim</h3>
+    <p><b>Cost: high. Persistence: n/a.</b></p>
+    <p>Admission is a claims check against the connecting process's primary token, not an Authenticode check on the binary (<a href="#security">section 10</a>). That shifts the target: the question isn't whether an attacker can sign a binary, it's whether they can obtain a token carrying <code class="mono">WESP://Permission</code>. Placing that attribute on a token requires roughly SYSTEM-level privilege already, so this isn't an escalation path on its own. It matters because it changes what you defend: token issuance and any process able to spawn with that claim, rather than a file on disk.</p>
+    <p>Weigh it against the entry above, though. Forging the claim is the expensive way to get admitted, and stealing an existing connection is the cheap way, because the gate runs once per connection and the result is then carried by a duplicable handle. Assume an attacker takes the cheaper path.</p>
+    <p>One further note: test-signed preview builds admit an elevated process with neither the attribute nor Antimalware PPL. That's a development affordance rather than a production finding, but also a reason not to generalize from test-signed experiments.</p>
+
+    <h3>What is harder than it looks</h3>
+    <p>Two paths that appear attractive on a static read and aren't.</p>
+    <ul class="tight">
+      <li><b>Editing the persisted store directly.</b> The registry keys holding registrations, rules, collections, and queue definitions are defended by the driver's own registry callback, not by an ACL. Published testing shows access denied even to SYSTEM running as a WinTcb protected process (<a href="#security">section 10</a>). Deleting a competitor's rule keys requires defeating a kernel callback first, which is a different class of problem from writing a registry value. Note the asymmetry with the first entry on this list: the supported API achieves a similar outcome without any of that work.</li>
+      <li><b>Assuming the absence of enforcement.</b> The driver does deny operations, through a verdict table returning <code>STATUS_VIRUS_INFECTED</code>, <code>STATUS_ACCESS_DENIED</code>, and <code>STATUS_NOT_FOUND</code>, and the rule descriptor carries a client-supplied action ordinal (<a href="#driver-gap">section 12</a>). Whether a third-party client may set a deny ordinal is <span class="chip gap">not recovered</span>. If it can, this section needs an entry it doesn't currently have, because a hostile registration would then be a denial-of-service primitive against any operation expressible as a rule, not merely a visibility problem.</li>
+    </ul>
+
+    <div class="callout">
+      <b>The through-line.</b> A driver-based product's weak points are its code and its load path. A WESP-based product's weak points are its <em>registration</em>, its <em>queue</em>, and its <em>connection handle</em>. None of the three is code the vendor wrote, and none is defended by the vendor's own privilege. Two of them, the registration GUID and the port handle, are bearer credentials: possession is authority, and the platform never asks how you came by them. That's the trade in a sentence: you stop shipping a kernel attack surface, and you start depending on a platform whose admission and delivery guarantees are outside your control. Whether that's a good trade depends on threats you can articulate, which is what the entries above are for.
+    </div>
+  </section>
+
+  <section id="gaps">
+    <div class="sec-head"><span class="sec-num">14</span><h2>What this analysis doesn't cover</h2></div>
+    <ul class="tight">
+      <li><span class="chip gap">not recovered</span> <b>Property ID names.</b> Which ID means Path, ImageFileName, and so on. Property IDs are plain <code class="mono">unsigned int</code> in the ABI with no enum type and no reachable strings, confirmed from the demangled signature of <code class="mono">Esp::QueryProperties</code>. Both PDBs are public symbol files carrying <code class="mono">/LinkInfo</code> and <code class="mono">/TMCache</code> but no type stream, so that route is closed as well. What is recovered is each property's <b>value kind</b> and each type's count (&sect;06), which narrows the candidates sharply without naming them. The comparison operators don't share this gap, because each ordinal traces to the evaluator that executes it.</li>
+      <li><span class="chip gap">partially recovered</span> <b>FilterType 0xD.</b> Its property types identify it as a network-endpoint object, most probably the remote-access context (&sect;06). The exact identity and the names of its four unresolved properties remain open.</li>
+      <li><span class="chip gap">not recovered</span> <b>Descriptor tables for RegistryKeyObject, Pipe, and Mailslot</b>, which resisted the extraction heuristic, along with a few individual property arms elsewhere.</li>
+      <li><span class="chip gap">partially recovered</span> <b>Capability policy.</b> The attribute and its two values are now known: <code class="mono">WESP://Permission</code> holding 10000000 or 1000000000, the latter additionally requiring Antimalware PPL (&sect;10). What remains open is which of the roughly 40 message types each class permits.</li>
+      <li><span class="chip gap">not recovered</span> <b>Bit values for <code class="mono">ESP_EVENT_CAPABILITIES</code></b>. The <code class="mono">ESP_EVENT_TYPE</code> members are recovered in full and listed in <a href="#architecture">section 3</a>.</li>
+      <li><span class="chip gap">not recovered</span> <b>Wire tag meanings</b> for the 15 <code class="mono">RuleUpdate</code> variants, beyond the split between rule-carrying and GUID-only operations.</li>
+      <li><span class="chip gap">partially recovered</span> <b>The rule <code class="mono">action</code> enumeration.</b> Its size (10 client-visible variants) and per-variant payload shapes are recovered (&sect;06), which establishes that the enum expresses both routing and verdicts. What's still missing is the <b>name and ordinal of each variant</b>, and specifically which ordinals a third-party client may legally set. The names exist nowhere as data, only in two panic messages, so closing this needs a live capture or a build with richer assertions.</li>
+      <li><span class="chip gap">not recovered</span> <b>The <code class="mono">ProcessChainMatchKind</code> enumeration</b>, which governs how ancestry predicates match.</li>
+      <li><b>No dynamic analysis.</b> No live driver interaction, no traffic capture over <code class="mono">\EspFilterPort</code>, and no fuzzing.</li>
+    </ul>
+    <div class="callout">
+      <b>Two ways to close the property ID gap.</b> Neither needs a header. First, find the in-box consumer: something already calls <code class="mono">espclient.dll</code>, and its call sites pass concrete property IDs next to recognizable operands such as a path string or a PID, which lets you name IDs empirically. Second, enable the <code class="mono">Microsoft.Windows.WESP.Client</code> provider (<code class="mono">ea3fdb23-a523-45db-bbc2-7b3bddf65666</code>) on a build where the platform runs. Its start events log the calling process alongside real <code class="mono">PropertyId</code> and <code class="mono">ComparisonType</code> values, which names consumers and property IDs in one pass.
+    </div>
+  </section>
+
+  <section id="appendix">
+    <div class="sec-head"><span class="sec-num">15</span><h2>Reference: functions and addresses</h2></div>
+    <p class="lede">Addresses as loaded in this analysis session. Rebase against a live image's <code>ImageBase</code> as needed.</p>
+
+    <details open>
+      <summary>wesp.sys</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th><th>Category</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">DriverEntry</td><td class="mono">180001000</td><td>Entry point</td></tr>
+          <tr><td class="mono">wesp::server::impl$0::connect</td><td class="mono">180006b70</td><td>Main message dispatcher, about 40 arms</td></tr>
+          <tr><td class="mono">wesp::server::write_collection_output&lt;buffer::User&gt;</td><td class="mono">18002b090</td><td>Collection response marshalling</td></tr>
+          <tr><td class="mono">wesp::server::write_collection_entries&lt;buffer::User&gt;</td><td class="mono">18002b490</td><td>Collection response marshalling</td></tr>
+          <tr><td class="mono">read_type&lt;buffer::User,ClientRequest&gt;</td><td class="mono">180041470</td><td>Request deserialization</td></tr>
+          <tr><td class="mono">ClientMessage::try_read&lt;buffer::User&gt;</td><td class="mono">18003f2a0</td><td>Request deserialization</td></tr>
+          <tr><td class="mono">ClientMessage::verify_capabilities</td><td class="mono">18003f1d0</td><td>Capability gate</td></tr>
+          <tr><td class="mono">capability::CapabilityTier::verify_property_query</td><td class="mono">180309a00</td><td>Capability gate</td></tr>
+          <tr><td class="mono">capability::CapabilityTier::thread_has_restricted_property</td><td class="mono">180317de0</td><td>Capability gate</td></tr>
+          <tr><td class="mono">CapabilityTier property-query jump table</td><td class="mono">1803e7fb4</td><td>15 arms, 180309a23&ndash;180309c82</td></tr>
+          <tr><td class="mono">ClientManager::register</td><td class="mono">18037dc60</td><td>Client management</td></tr>
+          <tr><td class="mono">ClientManager::find_by_id</td><td class="mono">18037bb00</td><td>Client management</td></tr>
+          <tr><td class="mono">ClientManager::disconnect_client</td><td class="mono">18037c930</td><td>Client management. No code xrefs; reached only through the disconnect jump table</td></tr>
+          <tr><td class="mono">fltmgr::connect_callback&lt;EspState&gt;</td><td class="mono">180041c40</td><td>Builds the connection cookie holding the resolved tier</td></tr>
+          <tr><td class="mono">fltmgr::message_notify_callback&lt;EspState&gt;</td><td class="mono">180042830</td><td>Cookie-driven dispatch. No caller re-validation</td></tr>
+          <tr><td class="mono">fltmgr::disconnect_callback&lt;EspState&gt;</td><td class="mono">180041d40</td><td>Teardown, driven by port close rather than process exit</td></tr>
+          <tr><td class="mono">ConnectedClientProcesses::contains_client</td><td class="mono">1802e21b0</td><td>Rule property read, not an authorization check</td></tr>
+          <tr><td class="mono">ConnectedClientProcesses::remove</td><td class="mono">1802e24c0</td><td>Sole caller is <code class="mono">disconnect_client</code></td></tr>
+          <tr><td class="mono">ClientManager::enumerate_connected_clients</td><td class="mono">18037f0d0</td><td>Client management</td></tr>
+          <tr><td class="mono">ClientManager::enumerate_registered_clients</td><td class="mono">18037f250</td><td>Client management</td></tr>
+          <tr><td class="mono">EventQueue::queue_async_notification_internal</td><td class="mono">1802d0e40</td><td>Event queue</td></tr>
+          <tr><td class="mono">EventQueue::get_notification</td><td class="mono">1802d0d90</td><td>Event queue</td></tr>
+          <tr><td class="mono">EventQueue::complete_async_notification</td><td class="mono">1802d1910</td><td>Event queue</td></tr>
+          <tr><td class="mono">EventQueue::report_memory_usage</td><td class="mono">1802d1780</td><td>Event queue</td></tr>
+          <tr><td class="mono">EventQueue::clear</td><td class="mono">1802d1c50</td><td>Event queue</td></tr>
+          <tr><td class="mono">AsyncStateInner::enqueue</td><td class="mono">1802d1040</td><td>Budget-capped enqueue</td></tr>
+          <tr><td class="mono">EspFsFilePreCreate</td><td class="mono">18001d560</td><td>Pre-operation hook</td></tr>
+          <tr><td class="mono">filter::comparison::evaluate_numeric_op</td><td class="mono">1803969a0</td><td>Comparison evaluation</td></tr>
+          <tr><td class="mono">filter::comparison::evaluate_string_op</td><td class="mono">1803962e0</td><td>Comparison evaluation</td></tr>
+          <tr><td class="mono">filter::comparison::BinaryComparison::evaluate_op</td><td class="mono">180397270</td><td>Comparison evaluation</td></tr>
+          <tr><td class="mono">Collection::contains</td><td class="mono">1802d04d0</td><td>Collections</td></tr>
+          <tr><td class="mono">Collection::enumerate</td><td class="mono">1802d0790</td><td>Collections</td></tr>
+          <tr><td class="mono">Collection::apply_updates</td><td class="mono">1802ce980</td><td>Collections</td></tr>
+          <tr><td class="mono">filter::comparand::open_collection_for_predicate</td><td class="mono">1802edf50</td><td>Collections in filters</td></tr>
+          <tr><td class="mono">ClientObject::create_collection</td><td class="mono">1802e7490</td><td>Collections</td></tr>
+          <tr><td class="mono">ClientObject::open_collection</td><td class="mono">1802e7240</td><td>Collections</td></tr>
+          <tr><td class="mono">ClientObject::close_collection_reference</td><td class="mono">1802e9aa0</td><td>Collections</td></tr>
+          <tr><td class="mono">ClientObject::enumerate_collection_ids</td><td class="mono">1802e90b0</td><td>Collections</td></tr>
+          <tr><td class="mono">PersistedStore::client_path</td><td class="mono">1803b57c0</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::collection_path</td><td class="mono">1803b58f0</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::collections_path_for_client</td><td class="mono">1803b5a10</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::rule_path</td><td class="mono">1803b5d90</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::rules_path_for_client</td><td class="mono">1803b5570</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::event_queue_path</td><td class="mono">1803b5b40</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::event_queues_path_for_client</td><td class="mono">1803b5c60</td><td>Persistence</td></tr>
+          <tr><td class="mono">PersistedStore::enum_rules</td><td class="mono">1803b1800</td><td>Persistence</td></tr>
+          <tr><td class="mono">persistence::registry::safe_join_path</td><td class="mono">1803b56a0</td><td>Persistence</td></tr>
+          <tr><td class="mono">persistence::registry::guid_to_string</td><td class="mono">18030b700</td><td>Persistence</td></tr>
+          <tr><td class="mono">persistence::registry::read_binary_value</td><td class="mono">18030b4d0</td><td>Persistence</td></tr>
+          <tr><td class="mono">persistence::registry::delete_key_recursive</td><td class="mono">18030c560</td><td>Persistence</td></tr>
+          <tr><td class="mono">persistence::transaction::StoreTransaction::commit</td><td class="mono">180378080</td><td>Persistence, transactional</td></tr>
+          <tr><td class="mono">persistence::transaction::StoreTransaction::persist</td><td class="mono">1803781e0</td><td>Persistence, transactional</td></tr>
+          <tr><td class="mono">persistence::loader::load_client</td><td class="mono">18036c0e0</td><td>Persistence</td></tr>
+          <tr><td class="mono">persist_collection_data_regions</td><td class="mono">180309cb0</td><td>Persistence</td></tr>
+          <tr><td class="mono">Store string constants: PersistedStore / Clients / Collections</td><td class="mono">1803c5934 / 1803c58cc / 1803c5900</td><td>Persistence</td></tr>
+          <tr><td class="mono">ClientRuleCollection::active_event_types</td><td class="mono">180360450</td><td>Rules</td></tr>
+          <tr><td class="mono">ClientRuleCollection::enumerate_rules</td><td class="mono">18035e950</td><td>Rules</td></tr>
+          <tr><td class="mono">ClientRuleCollection::update_rules</td><td class="mono">18035eb90</td><td>Rules</td></tr>
+          <tr><td class="mono">ClientRuleCollection::enable_or_disable_update</td><td class="mono">180360570</td><td>Rules</td></tr>
+          <tr><td class="mono">rule::RuleUpdateCommand::try_from_message</td><td class="mono">18030d390</td><td>Table at 1803e8138, 15 arms</td></tr>
+          <tr><td class="mono">MpReportPostRead</td><td class="mono">180398c24</td><td>Defender integration</td></tr>
+          <tr><td class="mono">MpReportPostWrite</td><td class="mono">180398cac</td><td>Defender integration</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: filter and rule construction</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspCreateFilter</td><td class="mono">1800d0580</td></tr>
+          <tr><td class="mono">EspCreateClientFilter</td><td class="mono">1800ce960</td></tr>
+          <tr><td class="mono">EspCreateEventFilter</td><td class="mono">1800ce780</td></tr>
+          <tr><td class="mono">EspCreateThreadFilter</td><td class="mono">1800d03a0</td></tr>
+          <tr><td class="mono">EspCreateProcessFilter</td><td class="mono">1800d01c0</td></tr>
+          <tr><td class="mono">EspCreateFileFilter</td><td class="mono">1800cfe00</td></tr>
+          <tr><td class="mono">EspCreateFileObjectFilter</td><td class="mono">1800cfc20</td></tr>
+          <tr><td class="mono">EspCreateFileStreamFilter</td><td class="mono">1800cffe0</td></tr>
+          <tr><td class="mono">EspCreateVolumeFilter</td><td class="mono">1800cfa40</td></tr>
+          <tr><td class="mono">EspCreateDiskFilter</td><td class="mono">1800cf860</td></tr>
+          <tr><td class="mono">EspCreateRegistryKeyFilter</td><td class="mono">1800cf680</td></tr>
+          <tr><td class="mono">EspCreateRegistryKeyObjectFilter</td><td class="mono">1800cf4a0</td></tr>
+          <tr><td class="mono">EspCreateDesktopFilter</td><td class="mono">1800cf2c0</td></tr>
+          <tr><td class="mono">EspCreateKtmTransactionFilter</td><td class="mono">1800cf0e0</td></tr>
+          <tr><td class="mono">EspCreatePipeFilter</td><td class="mono">1800cef00</td></tr>
+          <tr><td class="mono">EspCreateMailslotFilter</td><td class="mono">1800ced20</td></tr>
+          <tr><td class="mono">EspCreateTokenFilter</td><td class="mono">1800ceb40</td></tr>
+          <tr><td class="mono">EspCreateAndFilter</td><td class="mono">1800ce4e0</td></tr>
+          <tr><td class="mono">EspCreateOrFilter</td><td class="mono">1800ce240</td></tr>
+          <tr><td class="mono">EspCreateXorFilter</td><td class="mono">1800cdfa0</td></tr>
+          <tr><td class="mono">EspCreateNotFilter</td><td class="mono">1800cdc60</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: internal FFI and comparison conversion</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">Esp::Details::CreateFilterInternal</td><td class="mono">1800d4c64</td></tr>
+          <tr><td class="mono">Esp::CreateCompositeFilter</td><td class="mono">1800d4874</td></tr>
+          <tr><td class="mono">EspRsCreateFilter</td><td class="mono">1800269e0</td></tr>
+          <tr><td class="mono">EspRsCreateRule</td><td class="mono">180026e60</td></tr>
+          <tr><td class="mono">EspRsCreateNotFilter</td><td class="mono">180026af0</td></tr>
+          <tr><td class="mono">EspRsCreateCompositeFilter</td><td class="mono">180026810</td></tr>
+          <tr><td class="mono">espclient_rs::filter::Filter::new</td><td class="mono">18005df70</td></tr>
+          <tr><td class="mono">&nbsp;&nbsp;&#8627; object-type jump table, 19 entries</td><td class="mono">1800e4360</td></tr>
+          <tr><td class="mono">&nbsp;&nbsp;&#8627; comparison-type jump table, 19 entries</td><td class="mono">1800e43ac</td></tr>
+          <tr><td class="mono">&nbsp;&nbsp;&#8627; comparison arm cluster</td><td class="mono">18005e593&ndash;18005e6c8</td></tr>
+          <tr><td class="mono">comparison::DataComparison::try_from_raw</td><td class="mono">180016c40</td></tr>
+          <tr><td class="mono">comparison::NumericComparison::try_from_raw</td><td class="mono">180016e50</td></tr>
+          <tr><td class="mono">comparison::StringComparison::try_from_raw</td><td class="mono">180016450</td></tr>
+          <tr><td class="mono">comparison::BinaryComparison::try_from_raw</td><td class="mono">180015490</td></tr>
+          <tr><td class="mono">comparison::SidComparison::try_from_raw</td><td class="mono">180014a30</td></tr>
+          <tr><td class="mono">comparison::BoolComparison::try_from_bytes</td><td class="mono">180014fb0</td></tr>
+          <tr><td class="mono">comparison::ContextComparison::try_from_bytes</td><td class="mono">180016a50</td></tr>
+          <tr><td class="mono">comparison::NumericComparison::to_predicate</td><td class="mono">180017af0</td></tr>
+          <tr><td class="mono">comparison::StringComparison::to_predicate</td><td class="mono">180016150</td></tr>
+          <tr><td class="mono">EspStringMatchesPattern</td><td class="mono">1800c1b00</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: rule lifecycle and capabilities</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspCreateRule</td><td class="mono">1800cd7e0</td></tr>
+          <tr><td class="mono">EspCloseRule</td><td class="mono">1800cd510</td></tr>
+          <tr><td class="mono">EspGetRuleId</td><td class="mono">1800cd670</td></tr>
+          <tr><td class="mono">EspUpdateRules</td><td class="mono">1800ccd20</td></tr>
+          <tr><td class="mono">EspEnumerateRuleIds</td><td class="mono">1800cc250</td></tr>
+          <tr><td class="mono">EspEnumerateAllRulesForClient</td><td class="mono">1800cc5a0</td></tr>
+          <tr><td class="mono">EspRemoveRulesForClient</td><td class="mono">1800cc8b0</td></tr>
+          <tr><td class="mono">EspRemoveAllRulesForClient</td><td class="mono">1800ccaf0</td></tr>
+          <tr><td class="mono">EspCompleteEventNotification</td><td class="mono">1800cc000</td></tr>
+          <tr><td class="mono">EspGetEventCapabilities</td><td class="mono">1800c8970</td></tr>
+          <tr><td class="mono">EspArmEventNotification</td><td class="mono">1800d2460</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: client and queue lifecycle</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspRegisterClient</td><td class="mono">1800d3cf0</td></tr>
+          <tr><td class="mono">EspUnregisterClient</td><td class="mono">1800d3a00</td></tr>
+          <tr><td class="mono">EspConnectClient</td><td class="mono">1800d3590</td></tr>
+          <tr><td class="mono">EspDisconnectClient</td><td class="mono">1800d3340</td></tr>
+          <tr><td class="mono">EspEnumerateRegisteredClients</td><td class="mono">1800d3020</td></tr>
+          <tr><td class="mono">EspEnumerateConnectedClients</td><td class="mono">1800d2d00</td></tr>
+          <tr><td class="mono">EspQueryClientDescriptor</td><td class="mono">1800d2990</td></tr>
+          <tr><td class="mono">EspCreateEventQueue</td><td class="mono">1800d1fa0</td></tr>
+          <tr><td class="mono">EspConnectEventQueueWithCallback</td><td class="mono">1800d1e80</td></tr>
+          <tr><td class="mono">EspConnectEventQueueWithIocp</td><td class="mono">1800d1d40</td></tr>
+          <tr><td class="mono">EspOpenEventQueue</td><td class="mono">1800d1710</td></tr>
+          <tr><td class="mono">EspCloseEventQueue</td><td class="mono">1800d1b10</td></tr>
+          <tr><td class="mono">EspDisconnectEventQueue</td><td class="mono">1800d13f0</td></tr>
+          <tr><td class="mono">EspClearEventQueue</td><td class="mono">1800d1020</td></tr>
+          <tr><td class="mono">EspSetEventQueueStateChangeCallback</td><td class="mono">1800d0a10</td></tr>
+          <tr><td class="mono">EspRemoveEventQueueStateChangeCallback</td><td class="mono">1800d0750</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: property queries and support probes</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspQueryProcessProperties</td><td class="mono">1800ca510</td></tr>
+          <tr><td class="mono">EspQueryThreadProperties</td><td class="mono">1800ca370</td></tr>
+          <tr><td class="mono">EspQueryRegistryKeyProperties</td><td class="mono">1800ca1d0</td></tr>
+          <tr><td class="mono">EspQueryRegistryKeyObjectProperties</td><td class="mono">1800ca030</td></tr>
+          <tr><td class="mono">EspQueryFileObjectProperties</td><td class="mono">1800c9e90</td></tr>
+          <tr><td class="mono">EspQueryFileStreamProperties</td><td class="mono">1800c9cf0</td></tr>
+          <tr><td class="mono">EspQueryFileProperties</td><td class="mono">1800c9b50</td></tr>
+          <tr><td class="mono">EspQueryVolumeProperties</td><td class="mono">1800c99b0</td></tr>
+          <tr><td class="mono">EspQueryKtmTransactionProperties</td><td class="mono">1800c9810</td></tr>
+          <tr><td class="mono">EspQueryDiskProperties</td><td class="mono">1800c9670</td></tr>
+          <tr><td class="mono">EspQueryPipeProperties</td><td class="mono">1800c94d0</td></tr>
+          <tr><td class="mono">EspQueryMailslotProperties</td><td class="mono">1800c9330</td></tr>
+          <tr><td class="mono">EspQueryTokenProperties</td><td class="mono">1800c9190</td></tr>
+          <tr><td class="mono">EspQueryClientProperties</td><td class="mono">1800c8eb0</td></tr>
+          <tr><td class="mono">EspQueryDesktopProperties</td><td class="mono">1800c8d10</td></tr>
+          <tr><td class="mono">EspIsThreadPropertySupported</td><td class="mono">1800c7c50</td></tr>
+          <tr><td class="mono">EspIsProcessPropertySupported</td><td class="mono">1800c7a30</td></tr>
+          <tr><td class="mono">EspIsFileStreamPropertySupported</td><td class="mono">1800c7810</td></tr>
+          <tr><td class="mono">EspIsFilePropertySupported</td><td class="mono">1800c75f0</td></tr>
+          <tr><td class="mono">EspIsFileObjectPropertySupported</td><td class="mono">1800c73d0</td></tr>
+          <tr><td class="mono">EspIsVolumePropertySupported</td><td class="mono">1800c71b0</td></tr>
+          <tr><td class="mono">EspIsDiskPropertySupported</td><td class="mono">1800c6f90</td></tr>
+          <tr><td class="mono">EspIsRegistryKeyPropertySupported</td><td class="mono">1800c6d70</td></tr>
+          <tr><td class="mono">EspIsRegistryKeyObjectPropertySupported</td><td class="mono">1800c6b50</td></tr>
+          <tr><td class="mono">EspIsDesktopPropertySupported</td><td class="mono">1800c6930</td></tr>
+          <tr><td class="mono">EspIsKtmTransactionPropertySupported</td><td class="mono">1800c6710</td></tr>
+          <tr><td class="mono">EspIsPipePropertySupported</td><td class="mono">1800c64f0</td></tr>
+          <tr><td class="mono">EspIsMailslotPropertySupported</td><td class="mono">1800c62d0</td></tr>
+          <tr><td class="mono">EspIsTokenPropertySupported</td><td class="mono">1800c60b0</td></tr>
+          <tr><td class="mono">EspIsClientPropertySupported</td><td class="mono">1800c5c70</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+
+    <details>
+      <summary>espclient.dll: object references and collections</summary>
+      <div class="twrap appendix"><table>
+        <thead><tr><th>Symbol</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EspCreateFileReferenceByPath</td><td class="mono">1800c58e0</td></tr>
+          <tr><td class="mono">EspCreateFileReferenceById</td><td class="mono">1800c5590</td></tr>
+          <tr><td class="mono">EspCreateFileStreamReferenceByPath</td><td class="mono">1800c5200</td></tr>
+          <tr><td class="mono">EspCreateFileStreamReferenceById</td><td class="mono">1800c4d40</td></tr>
+          <tr><td class="mono">EspCreateVolumeReference</td><td class="mono">1800c4a40</td></tr>
+          <tr><td class="mono">EspCreateDiskReference</td><td class="mono">1800c46b0</td></tr>
+          <tr><td class="mono">EspCreatePipeReference</td><td class="mono">1800c4320</td></tr>
+          <tr><td class="mono">EspCreateMailslotReference</td><td class="mono">1800c3f90</td></tr>
+          <tr><td class="mono">EspCreateRegistryKeyReference</td><td class="mono">1800c39a0</td></tr>
+          <tr><td class="mono">EspCreateDesktopReference</td><td class="mono">1800c36a0</td></tr>
+          <tr><td class="mono">EspCreateCollection</td><td class="mono">1800c31c0</td></tr>
+          <tr><td class="mono">EspOpenCollection</td><td class="mono">1800c2ab0</td></tr>
+          <tr><td class="mono">EspUpdateCollection</td><td class="mono">1800c2670</td></tr>
+          <tr><td class="mono">EspEnumerateCollectionEntries</td><td class="mono">1800c2020</td></tr>
+        </tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section id="credits">
+    <div class="sec-head"><span class="sec-num">16</span><h2>Credits and corroboration</h2></div>
+    <p>Independent public work on WESP by Jonny Johnson was used to check this analysis:</p>
+    <ul class="tight">
+      <li><b>A First Look Inside the Windows Endpoint Security Platform</b> &mdash; <code class="mono">jonny-jhnson.dev/blog/a-first-look-inside-the-windows-endpoint-security-platform/</code></li>
+      <li><b>WespConsumerPOC</b>, a working consumer in C++ &mdash; <code class="mono">github.com/jonny-jhnson/WespConsumerPOC</code>. Tested against <code class="mono">espclient.dll</code> 0.1.0.154553750 on ARM64, the same version analysed here on x64.</li>
+    </ul>
+    <p>Where the two overlap, they agree. The proof-of-concept independently confirms the client registration fields including <code class="mono">altitude</code>, the event queue descriptor and its 64 MiB default capacity, the 0x1010-byte notification buffer, the full call sequence from <code class="mono">EspConnectClient</code> through arm and complete, and the property record layout of <code class="mono">{id, type, value}</code> triples.</p>
+    <p>It contributed several things this static analysis could not produce on its own.</p>
+    <ul class="tight">
+      <li><b>Three real property names</b>, <code class="mono">kProcessCommandLine = 1</code>, <code class="mono">kProcessId = 6</code>, and <code class="mono">kProcessImagePath = 20</code>, whose value kinds match the typed map in <a href="#filters">section 6</a> exactly.</li>
+      <li><b>The value 1000 for process creation</b>, which resolved the event-type numbering. It showed the 1000 group is <em>process</em> rather than thread, placing thread in 1&ndash;3 and shifting every subsequent group into place. An earlier draft had those groups labelled one category off.</li>
+      <li><b>The connection gate</b>: the <code class="mono">WESP://Permission</code> token attribute, its two values, and the Antimalware PPL requirement on the higher one. This analysis had found the mechanism (<code class="mono">CapabilityTier</code> fed by token security attributes) but not the policy.</li>
+      <li><b>The port's access control and limits</b>: default security descriptor with <code class="mono">FLT_PORT_ALL_ACCESS</code> restricting to Administrators and SYSTEM, and a 512-connection maximum.</li>
+      <li><b>The delivery worker</b>: a per-queue system thread waiting on a <code class="mono">KEVENT</code> and delivering through <code class="mono">FltSendMessage</code>, which explains the <code class="mono">KeSetEvent</code> this analysis found in the enqueue path.</li>
+      <li><b>A disproof.</b> Testing showed the persisted store denies access even to SYSTEM running as a WinTcb protected process. This analysis had reasoned from the absence of security-descriptor imports that the store was protected only by inherited permissions, and concluded it was a soft target for enumeration and rule deletion. That conclusion was wrong and is corrected in <a href="#security">section 10</a>.</li>
+    </ul>
+    <p>The blog also reports that the binaries first appeared publicly in Windows Insider Preview build <b>29661</b>, and notes a CrowdStrike demonstration of blocking malware execution through this platform, which is consistent with the deny verdict table in <a href="#lifecycle">section 4</a>.</p>
+  </section>
+
+  <footer>
+    <p><b>Sources.</b> Two binaries, <code class="mono">wesp.sys</code> and <code class="mono">espclient.dll</code>, plus a decoded TraceLogging manifest for the <code class="mono">Microsoft.Windows.WESP.Client</code> provider, checked against the public work listed in section 16. The manifest is authoritative for field names and event structure and corroborates parameter roles derived from disassembly. It contains no enum value maps.</p>
+    <p><b>Method.</b> Both binaries were analysed in Ghidra 12.1.2 with Microsoft symbol-server PDBs resolved for each. Findings come from decompiler output, import and export tables, PDB-typed signatures, string extraction from the raw images, and manual decoding of compiler-generated jump tables from raw bytes where the decompiler couldn't follow them. No dynamic tracing, driver loading, or live protocol capture took place. The main message dispatcher decompiles to more than 500,000 characters with heavily mangled types; only the passages cited in section 10 should be treated as confirmed from it.</p>
+  </footer>
+</div>
