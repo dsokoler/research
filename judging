@@ -1,0 +1,328 @@
+Orchestrator + Judge Gate for Long Sequential Tasks
+
+Overview
+This spec builds a single orchestrator session in Claude Code that runs a long list of similar tasks (your 150) to completion, without you re-typing "continue." Three roles do the work:
+1. Orchestrator — the main session. Holds only the checklist and dispatches one task at a time. It does no task work itself, so its context stays small.
+2. Worker subagent — spawned once per task, in its own fresh context. Does the actual work, verifies it, reports one short line back.
+3. Judge Stop hook — an agent-type hook that fires whenever the orchestrator tries to end its turn. It reads the original request from the session transcript, checks the work against stated acceptance criteria, and forces the turn to continue if anything is unmet.
+The judge is the generic part: it grades "did you finish what was asked" against criteria the task itself declares, so the same hook works on any long task, not just checkbox lists. The acceptance-criteria file is what keeps a language-model judge honest.
+Use this when a job has many sequential steps and you want it to run unattended or semi-attended. For a job you will babysit anyway, the checklist alone is enough and the judge is optional — see Failure Modes. For fully independent tasks at scale, an external driver script is more robust than any single session; this spec is the single-orchestrator design you asked for.
+Architecture
+Orchestrator (main session). You launch it once with a kickoff prompt (Component 2). Its whole job is to walk the task list in order and, for each item, spawn a worker and record the result. It keeps PROGRESS.md — one line per task — as the single source of truth for what is done. Because it never does task work in its own context, 150 workers' worth of detail never accumulates there; only 150 short result lines do.
+Worker subagent (one per task). Defined in .claude/agents/task-worker.md (Component 1). Each spawn is a fresh context that receives exactly one task plus a pointer to the shared spec. It does the work, runs whatever per-task verification you define, and returns a one-line verdict (DONE <id> or FAILED <id>: <reason>). The tiny reply is deliberate: it is all that flows back into the orchestrator.
+Judge Stop hook (fires on every turn end). Defined in .claude/settings.json (Component 3) as a type: "agent" hook on the Stop event. When the orchestrator tries to end its turn, the hook spawns a verifier subagent that reads the original request from the transcript, reads the acceptance criteria, checks the actual artifacts, and returns {"ok": true} to allow the stop or {"ok": false, "reason": ...} to force the turn to continue with reason as the next instruction.
+Flow per task:
+1. Orchestrator reads the next unchecked line in PROGRESS.md.
+2. It spawns task-worker with that task.
+3. Worker does the task, self-verifies, returns its one-line verdict.
+4. Orchestrator marks the line [x] (done) or [!] (failed, with reason) and moves on.
+5. When it thinks it is finished and tries to stop, the Stop hook fires.
+6. The judge checks completion against the criteria. If unmet, it returns ok:false and the orchestrator keeps going; if met, the turn ends.
+The two checks are layered on purpose: the worker's own verification catches a bad result at the moment it is produced (task 12, not task 150), and the judge is the final gate on "is the whole job actually done."
+The acceptance-criteria contract
+This one convention is what lets a language-model judge generalize without being gullible. The problem with an LLM judge that reads the orchestrator's own summary is that a confident "all 150 tasks completed" can talk it into approving. The fix: the judge never trusts a claim it cannot verify, and it checks against criteria written before the work starts, not against the narrative produced after.
+The convention. At the very start of any long task, the orchestrator writes a DONE_CRITERIA.md file listing the concrete, checkable conditions for "done." The judge reads this file every time it fires. If the file is absent, the judge approves the stop immediately — that is what keeps the same hook harmless on short, everyday sessions.
+What goes in it — checkable, not vague:
+• Each criterion is something the judge can confirm by reading a file, running a command, or counting, not by reading prose. Good: "PROGRESS.md contains 150 lines and none begins with - [ ]." Bad: "all tasks are done."
+• Point at artifacts: output files that must exist, a test or lint command that must exit 0, row counts, a summary file the workers append to.
+• Keep it short. Five to ten lines covering the real finish conditions beats an exhaustive list the judge will skim.
+Example DONE_CRITERIA.md for the 150-task job:
+# Done criteria
+- PROGRESS.md has exactly 150 task lines.
+- No line in PROGRESS.md starts with "- [ ]" (all dispatched).
+- Every line marked "- [!]" has a failure reason and appears in FAILURES.md.
+- `make verify` exits 0.
+- output/ contains one result file per completed task id.
+The judge's job then reduces to the same mechanical loop on every task: read the criteria, check each one against reality, approve only if all pass. That is most of the determinism of a hard-coded grep check, while staying general enough to reuse.
+File layout
+project/
+├── .claude/
+│   ├── settings.json            # registers the judge Stop hook
+│   └── agents/
+│       └── task-worker.md       # the per-task worker subagent
+├── TASK_SPEC.md                 # shared rules every worker follows
+├── PROGRESS.md                  # 150 checklist lines; source of truth
+├── DONE_CRITERIA.md             # what "done" means; the judge reads this
+├── FAILURES.md                  # workers/orchestrator log failed tasks here
+└── output/                      # per-task result files
+• .claude/settings.json and .claude/agents/ are project-scoped, so they apply only in this project and can be committed. (Hooks in .claude/settings.json require you to trust the folder; see Permissions.)
+• TASK_SPEC.md holds the instructions common to all 150 tasks so each worker gets the same spec without the orchestrator repeating it in every dispatch.
+• PROGRESS.md is both the work queue and the record. One line per task, e.g. - [ ] 001 <task description>.
+• DONE_CRITERIA.md is the contract from the previous section.
+• output/ is wherever the real deliverables land; the criteria reference it.
+Component 1 — worker subagent
+Save as .claude/agents/task-worker.md. The frontmatter tools line restricts the worker to what a task needs; narrow it to the real set so a worker can't wander. The body is its whole instruction set.
+---
+name: task-worker
+description: Performs exactly one task from the run. Invoked by the orchestrator, one spawn per task.
+tools: Read, Edit, Write, Bash
+---
+
+You perform ONE task and then stop. You are given a single task id and its
+description in the prompt.
+
+Steps:
+1. Read TASK_SPEC.md for the rules that apply to every task.
+2. Do the one task you were given. Do not touch other tasks or other files.
+3. Verify your own work using the check defined in TASK_SPEC.md (run the test /
+   lint / assertion for this task). If it does not pass, fix and retry up to
+   twice.
+4. Write your result to output/<id>.<ext> as TASK_SPEC.md specifies.
+5. Reply with ONE line and nothing else:
+   - "DONE <id>" if the task and its verification passed.
+   - "FAILED <id>: <one-line reason>" if it could not be completed. Also append
+     that line to FAILURES.md.
+
+Keep your reply to that single line. Do not summarize, do not explain, do not
+ask questions.
+Why these choices:
+• One task per spawn keeps each worker's context clean and independent, which is the whole reason to use subagents instead of doing the work inline.
+• Self-verification inside the worker means a failure is caught and either fixed or reported at the moment it happens.
+• The one-line reply is what makes 150 results fit in the orchestrator's context. A verbose worker would defeat the design.
+• Bounded retry (twice, then report FAILED) prevents one hard task from stalling the whole run; you clean up failures in a final pass.
+Component 2 — orchestrator kickoff
+Before the run, create DONE_CRITERIA.md, TASK_SPEC.md, and PROGRESS.md (150 lines of - [ ] <id> <desc>). Then start the session and give the orchestrator this prompt:
+You are an orchestrator. You do NOT perform tasks yourself.
+
+The work queue is PROGRESS.md, one task per line. For each line that still
+starts with "- [ ]", in top-to-bottom order:
+  1. Dispatch the task-worker subagent, passing that line's id and description.
+  2. When it replies, update the line in PROGRESS.md:
+     - "- [x] <id> ..." if the worker returned DONE.
+     - "- [!] <id> ... (reason)" if it returned FAILED.
+  3. Move to the next unchecked line.
+
+Complete every task without pausing to ask me for confirmation. Do not stop or
+summarize while any line still starts with "- [ ]". When none remain, give me a
+short summary: how many succeeded, and the ids and reasons of any that failed.
+Notes:
+• "You do NOT perform tasks yourself" is the load-bearing line. Without it the orchestrator will sometimes start doing the work in its own context and fill up.
+• The explicit "do not pause to ask" cuts down on the most common early-stop behavior even before the hook is involved.
+• Dispatch one worker at a time as written here. If your 150 tasks are fully independent and touch separate files, you can tell the orchestrator to run a few workers in parallel — but only then, or they will collide.
+• The orchestrator, not you, edits PROGRESS.md after each result. That file surviving compaction is what lets the run resume its place if context is summarized.
+Component 3 — the judge Stop hook
+This is the generic completion gate. It is a type: "agent" hook on the Stop event: an agent hook spawns a subagent with tool access (Read, Grep, Glob, and more), so it can verify against real artifacts rather than trust a summary. Register it in .claude/settings.json:
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "A Claude Code session is trying to end its turn. Decide whether the task it was given is actually complete.\n\nSteps:\n1. Read the user's original request from the transcript at the path in the input JSON (transcript_path). That request is the source of truth for what was asked.\n2. If a DONE_CRITERIA.md file exists in the working directory, read it and treat each line as a required condition. If it does NOT exist, respond {\"ok\": true} and stop — you have no criteria to enforce.\n3. Verify each criterion yourself: read the named files, run the named commands, count what needs counting. Do NOT trust any claim of completion you cannot confirm firsthand.\n4. If every criterion passes, respond exactly {\"ok\": true}.\n5. If any criterion is unmet, respond {\"ok\": false, \"reason\": \"<what remains, as a direct instruction to continue>\"}.\n\nInput JSON: $ARGUMENTS",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
+The response contract (this is different from command hooks). Prompt and agent hooks do NOT use decision: "block". They return:
+• {"ok": true} → the stop is allowed, the turn ends.
+• {"ok": false, "reason": "..."} → on a Stop hook, reason is fed back to Claude and it keeps working, using reason as its next instruction.
+Agent-hook specifics (from the current docs): default timeout 60s (raise it with timeout, in seconds, as above), up to 50 tool-use turns, and it does not support the prompt-hook impossible field. $ARGUMENTS is replaced with the hook's input JSON, which includes transcript_path, cwd, session_id, and stop_hook_active.
+Prompt hook as the lighter alternative. If your criteria are checkable from the transcript alone and you don't need to run commands, use type: "prompt" instead — a single fast-model call (Haiku by default; set model for more). Its contract adds two useful fields: {"ok": false, "reason": ..., "impossible": true} lets the model concede a condition can never be met so the turn is allowed to end, and continueOnBlock controls tool-event behavior (not needed for Stop). A prompt-hook version of the gate:
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Read DONE_CRITERIA.md if present. If absent, respond {\"ok\": true}. Otherwise judge from the transcript whether every criterion is met. If yes, {\"ok\": true}. If not, {\"ok\": false, \"reason\": \"what remains\"}."
+          }
+        ]
+      }
+    ]
+  }
+}
+Recursion / loop guard. Claude Code overrides a Stop hook after it blocks 8 times in a row without progress, then ends the turn with a warning. Two things keep you inside that: the judge only blocks on genuinely unmet criteria (so real progress clears blocks), and it returns ok:true the moment criteria pass. If a run legitimately needs more than 8 blocks to converge, raise the cap with the CLAUDE_CODE_STOP_HOOK_BLOCK_CAP environment variable. A command-hook gate reads stop_hook_active from its input and exits early when true to avoid looping; the agent/prompt hook expresses the same intent by conceding (prompt hook's impossible) or simply passing once done.
+Permissions and safety
+Pre-allow the tools the run needs. A permission prompt at task 47 stalls an unattended run exactly like an early stop does — the session sits waiting for approval that never comes. Decide up front what the workers need and grant it, so nothing blocks mid-run. Options, least to most permissive:
+• Set specific allow rules in .claude/settings.json (the permissions.allow list) for the exact tools/commands the workers use, e.g. Read, Edit, Write, Bash(make:*). This is the safe default.
+• Run in acceptEdits mode if the work is mostly file edits.
+• Use --dangerously-skip-permissions only in a disposable sandbox or container, never against anything you care about. It removes the guardrail entirely.
+Hooks and trust. A Stop hook in .claude/settings.json runs once you've trusted the project folder (the workspace-trust dialog). Note the direction of hook power: a hook can tighten restrictions (a deny blocks even in bypass mode) but a hook returning allow does not loosen deny rules. The judge only ever forces more work, so it's on the safe side of this.
+The block cap is a safety limit, not a bug. The 8-in-a-row Stop-block override exists so a misfiring gate can't trap a session forever. Treat hitting it as a signal that either the criteria can't be met or the workers aren't making progress — investigate rather than blindly raising CLAUDE_CODE_STOP_HOOK_BLOCK_CAP. Raise the cap only when you know the job genuinely needs more iterations to converge.
+Scope the hook to this project. Because the gate lives in project settings, it fires only in this project's sessions. If you ever move it to user settings (~/.claude/settings.json), it will fire on every session including quick questions — the no-criteria-means-approve rule keeps that harmless, but project scope is cleaner.
+Failure modes and how the design handles each
+Failure
+What it looks like
+How the design handles it
+Early stop
+Orchestrator ends with "I've done 30, want me to continue?"
+The Stop hook checks criteria and returns ok:false, forcing it to continue. The kickoff prompt's "don't pause to ask" reduces how often this happens in the first place.
+Bad result
+A task is marked done but the output is wrong
+Caught at two layers: the worker's own verification at production time, and the judge's criteria (e.g. make verify exits 0) at the end.
+Judge loop
+Hook keeps blocking, no progress
+Capped at 8 consecutive blocks, then the turn is allowed to end with a warning. Signals a real problem to investigate.
+Compaction
+Context fills, gets summarized mid-run
+State lives in PROGRESS.md, not the orchestrator's memory. After compaction it re-reads the file and resumes at the first unchecked line.
+Permission stall
+Session waits forever on an approval prompt
+Pre-allowed tools mean no mid-run prompt. This looks like an early stop but isn't the model's doing — it's the approval gate.
+One hard task
+A single item can't be completed
+Worker retries twice, then returns FAILED and logs to FAILURES.md. The run continues; you do a cleanup pass at the end.
+Do you even need the judge? For a job you're checking on periodically, no — PROGRESS.md already lets you type "continue" and resume exactly where it left off, losing nothing. The judge earns its place when you want the run to finish unattended, or when "done" is a judgment call the criteria file can capture. For a babysat run, the checklist plus the kickoff prompt's anti-pause instruction is enough.
+Test plan
+Validate the machinery on a tiny run before committing 150 tasks to it.
+1. Dry-run the worker alone. Put 3 tasks in PROGRESS.md, run the orchestrator, and confirm each spawns a worker, the worker writes to output/, and the line flips to [x]. Check that a deliberately-impossible task ends up [!] with a reason in FAILURES.md rather than looping.
+2. Test the judge fires. With 3 unchecked tasks, interrupt or prompt the orchestrator to stop early. Confirm the Stop hook blocks and it resumes. /hooks in the session shows the hook is registered; run claude --debug (or /debug mid-session) to see the hook's matches, its ok/reason output, and any errors.
+3. Test the judge passes. Let the 3-task run finish. Confirm the hook returns ok:true and the turn actually ends — i.e. the gate isn't stuck rejecting a genuinely complete run.
+4. Test the no-criteria path. In an unrelated quick session (or with DONE_CRITERIA.md renamed away), confirm the hook approves the stop immediately, so it doesn't interfere with normal work.
+5. Check the cap behavior. Optionally, set criteria that can't be met and confirm the run stops after 8 blocks with the override warning rather than hanging.
+Only once 1–4 pass, scale PROGRESS.md up to 150 and start the real run. Keep claude --debug-file /tmp/run.log writing so you have a trace if something stalls overnight.
+Version notes and sources
+The hook schema here — the agent/prompt hook types, the {"ok": true} / {"ok": false, "reason": ...} response contract, the impossible and continueOnBlock fields, the 50-turn agent limit, the 60s default agent timeout, $ARGUMENTS, stop_hook_active, and the 8-block cap with CLAUDE_CODE_STOP_HOOK_BLOCK_CAP — is from the current Claude Code hooks docs as of the date on this doc. Agent hooks are marked experimental and may change; for a rock-solid gate, a command hook that greps PROGRESS.md for - [ ] and exits 2 is the deterministic fallback (it just doesn't generalize).
+Verify against your installed version before the real run, since flags and hook fields move between releases:
+• claude --help for the current CLI flags (--dangerously-skip-permissions, --debug, --debug-file, permission-mode flags).
+• /hooks in-session to confirm the gate is registered and reading from the settings file you expect.
+Sources:
+• Hooks reference
+• Automate actions with hooks (guide)
+• Subagents
+Decision logging: two streams
+To audit the branches other agents took, the judge needs two things that a single log can't give it: what actually happened and why the agent thought it was right. And you can't trust an agent's after-the-fact account of its own reasoning any more than you can trust "all 150 done" — so capture both independently and let the judge cross-check them. A stated rationale that doesn't match the recorded actions is itself the signal that a branch went wrong.
+Stream 1 — the action log (automatic, hook-written). A PostToolUse hook appends one line per edit/write/command, tagged with which agent did it. No agent cooperation is involved, so it can't be skipped or spun. This is ground truth. Because settings-file hooks also fire inside subagents, and the input carries agent_id/agent_type there, every worker's actions are captured and attributed:
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '{ts:(now|todate), agent:(.agent_type//\"orchestrator\"), agent_id:(.agent_id//\"main\"), tool:.tool_name, input:.tool_input}' >> \"$CLAUDE_PROJECT_DIR/actions.jsonl\""
+          }
+        ]
+      }
+    ]
+  }
+}
+Stream 2 — the decision log (agent-authored, enforced). The action log shows what an agent did but not why it chose that branch over another. So each worker also writes a structured decision record at every non-trivial fork: the choice, the alternatives it rejected, and the reason. One file per task (decisions/<id>.jsonl) keeps concurrent workers from stepping on each other's appends. One line per decision:
+{"task":"042","agent":"task-worker","phase":"approach","chose":"stream-parse","alternatives":["load-whole-file"],"why":"input can exceed memory; spec says stay under 512MB","evidence":"TASK_SPEC.md line 14"}
+The judge reads both: the decision log tells it which branch was taken and the claimed justification; the action log lets it confirm the agent actually did that, and against TASK_SPEC.md it can judge whether the branch was legitimate.
+Forcing the logging: three layers
+"Tell the agent to log its decisions" fails for the same reason "finish all 150" fails — it's soft. Make it deterministic in layers, strongest first.
+Layer 1 — the action log can't be skipped. It's the PostToolUse hook above. The agent doesn't opt in; Claude Code fires it on every matching tool call, in the orchestrator and inside every worker. This layer needs no cooperation and is your reliable backstop.
+Layer 2 — enforce the decision log with a SubagentStop hook. The worker's contract (its agent file) requires a decision record before it finishes; a SubagentStop hook makes that requirement binding by refusing to let a worker stop until the record exists. SubagentStop matched on the worker's agent type fires when each worker finishes, and exit 2 keeps it from stopping. Add to .claude/settings.json:
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "task-worker",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/require-decision-log.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
+The script reads the worker's final line from last_assistant_message in the hook input (the DONE <id> / FAILED <id> line), then checks that decisions/<id>.jsonl exists and is non-empty. If not, it exits 2 with a reason, which is fed back so the worker keeps working and logs:
+#!/bin/bash
+INPUT=$(cat)
+ID=$(echo "$INPUT" | jq -r '.last_assistant_message' | grep -oE '(DONE|FAILED) [0-9]+' | grep -oE '[0-9]+' | head -1)
+if [ -z "$ID" ] || [ ! -s "$CLAUDE_PROJECT_DIR/decisions/$ID.jsonl" ]; then
+  echo "No decision record for task $ID. Append your branch decisions to decisions/$ID.jsonl before finishing." >&2
+  exit 2
+fi
+exit 0
+Add the matching requirement to the worker's agent file: "Before you reply, append one line to decisions/<id>.jsonl for each non-trivial choice you made (approach, interpretation of an ambiguous task, error handling), with chose, alternatives, why, and evidence."
+Layer 3 — the orchestrator logs its own branches. The orchestrator's auditable decision is the mapping from a worker's verdict to what it wrote in PROGRESS.md. Have it append an orchestrator.jsonl record per dispatch — task id, verdict received, action taken — so the judge can confirm it didn't mismark or skip anything. If the orchestrator uses the task list instead of a flat file, TaskCreated and TaskCompleted hooks can capture those transitions automatically, the same way PostToolUse captures tool calls.
+Note for parallel workers. All three layers write append-only. Per-task decision files (decisions/<id>.jsonl) already avoid collisions; for the shared actions.jsonl, POSIX appends under a few KB are atomic, so concurrent workers are generally safe, but if you fan out widely, give each worker its own actions/<id>.jsonl and let the judge glob them.
+How the judge audits branches (and catches taint)
+With both logs in place, the judge stops grading only outputs and starts grading reasoning. Add these to DONE_CRITERIA.md so the judge checks them:
+• Coverage — every task marked [x] has a decision record and an action-log entry.
+• Consistency of stated vs actual — each record's why matches what the action log shows the agent actually did. A worker that claimed one branch but did another is flagged, not passed.
+• Legitimacy — each chose is allowed by TASK_SPEC.md; no worker took a branch the spec forbids (wrote to a shared file, skipped the verification step, used a disallowed approach).
+• Verdict integrity — the orchestrator's PROGRESS.md mark matches the worker's actual verdict and the output that exists.
+Catching taint specifically — audit per task, not just at the end. The worry is that a wrong branch at task 12 silently poisons 13–150. End-of-run auditing finds it, but only after 138 tasks built on it. To stop propagation, put a second SubagentStop hook on the worker — an agent-type one — that audits each worker's decision the moment it finishes:
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "task-worker",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "A worker just finished. Read its decision records in decisions/ for the task id in its final message, and its actions in actions.jsonl. Verify: each choice is permitted by TASK_SPEC.md, the stated reason matches the actions taken, and no choice contradicts a convention already recorded in CONVENTIONS.md. Respond {\"ok\": true} if sound, or {\"ok\": false, \"reason\": \"which branch is wrong and what to do instead\"} to send the worker back. Input: $ARGUMENTS"
+          }
+        ]
+      }
+    ]
+  }
+}
+Both SubagentStop hooks fire together and combine (most restrictive wins), so the cheap command check enforces that a decision was logged and this agent check judges whether the branch was right — the second is what actually prevents a bad decision from tainting the rest. It costs one model call per worker, which is worth it precisely when later tasks depend on earlier ones.
+Guarding against drift across tasks. Some branches set a precedent the whole run should follow (a naming scheme, a shared data format). Have the first worker that makes such a call record it in a CONVENTIONS.md; later workers read it before deciding, and both the per-task and end-of-run judges check the decision log for any record that contradicts it. A contradiction in the log is the fingerprint of exactly the tainting you're trying to catch — one agent quietly diverging from what the others assumed.
+The layering, end to end: the worker's own verification catches a broken result at production time; the per-task agent judge catches an unsound branch before the next task builds on it; the end-of-run judge catches anything that slipped through and confirms the whole run's reasoning holds together. The logs are what make the last two possible — without them the judges are grading a summary, which is the one thing you can't trust.
+Tuning log volume for tool-heavy workflows
+If your workflows fire a lot of tools, the blanket PostToolUse action log from Decision logging: two streams is the wrong granularity — it records the whole movie when the judge only needs the net change. Drop it and capture what each task changed, not every call it made. The agent-authored decision log (a few lines per task) stays as-is; only the action stream gets lighter. The intermediate churn — exploratory reads, scratch commands — can't taint anything; only the net effect and the reasoning can.
+Best, if you're in git: let git hold only vetted work. Commit each task's work with the id in the message — but run the judge before the commit, not after (see Judge before the commit below), so a wrong branch never lands in history. Then git log per task is your audit trail: a record of judged states, zero separate logging, with each commit doubling as the evidence for that task's decision record.
+Not in git: snapshot the change once per task. A single SubagentStop command hook fires when each worker finishes and appends one compact line — the diffstat, or the files that landed:
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "task-worker",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/log-changeset.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
+#!/bin/bash
+ID=$(cat | jq -r '.last_assistant_message' | grep -oE '[0-9]+' | head -1)
+echo "$ID  $(git diff --stat | tail -1)" >> "$CLAUDE_PROJECT_DIR/changes.log"
+Outside a repo, swap the git diff --stat for a listing of what landed — e.g. files under output/ newer than a run-start marker. Either way it's ~1 line per task instead of thousands.
+If you truly need per-call detail, filter to the consequential calls. Most tool calls in a heavy workflow are reads and routine commands that can't take a wrong branch. Use the handler if field to log only the mutations that represent a real decision — commits, deletes, network, writes to tracked paths — and let everything else go unlogged:
+{
+  "matcher": "Bash",
+  "hooks": [
+    { "type": "command", "if": "Bash(git commit *)", "command": "...log-action.sh" },
+    { "type": "command", "if": "Bash(rm *)",         "command": "...log-action.sh" },
+    { "type": "command", "if": "Bash(curl *)",       "command": "...log-action.sh" }
+  ]
+}
+If the heaviness is parallel fan-out rather than sequential volume, PostToolBatch fires once per resolved batch instead of once per call, collapsing each fan-out into a single record.
+The judge's cross-check adjusts to match. Instead of matching every call against the stated reason, it checks that the net change and final artifacts line up with the branch the decision log claims. That's a stronger check anyway — it grades the outcome, not the keystrokes — and it stays cheap across hundreds of tasks.
+Judge before the commit
+If git history should hold only vetted work, the audit has to run before the commit lands — reading commits after the fact is too late. So move the gate onto the commit itself. A PreToolUse hook matched on the commit command fires before it runs and can block it; make it an agent hook that reviews what's about to be committed against the decision log, and the commit only goes through if the branch is sound.
+The per-task flow becomes: worker does the work → writes its decision records → attempts git commit. The gate fires on that commit, reads the diff about to land (git diff HEAD), the task's decisions/<id>.jsonl, and TASK_SPEC.md, and allows or denies. On denial the reason is returned to the worker as the commit's error, so it fixes the branch and re-commits. Nothing wrong ever enters history.
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "agent",
+            "if": "Bash(git commit *)",
+            "prompt": "A worker is about to commit a task's work. Read the diff about to be committed (git diff HEAD), the task's decision records under decisions/ for the id in that work, and TASK_SPEC.md. Verify every branch it took is permitted, its stated reason matches the diff, and nothing contradicts CONVENTIONS.md. Respond {\"ok\": true} to allow the commit, or {\"ok\": false, \"reason\": \"which branch is wrong and what to do instead\"} to block it. Input: $ARGUMENTS"
+          }
+        ]
+      }
+    ]
+  }
+}
+Two properties make this the right boundary. PreToolUse fires before the commit runs and before any permission check, so a deny stops the commit even in bypass mode — the gate can't be skipped. And on PreToolUse, an agent hook's {"ok": false} returns the reason to the worker and lets it keep working, which is exactly the fix-and-re-commit loop you want rather than a hard stop.
+This also settles the logging question from the previous section: once only vetted commits can land, git log per task is the audit trail — a record of judged states, not raw activity. You don't need a separate post-hoc action log; the gate upstream of the commit is what gives the history its meaning. The agent-authored decision log still exists, but as the input the gate reasons over, written just before the commit it defends.
+Parallel workers need isolation here. A shared working tree can't cleanly gate one task's commit while another worker is mid-edit. If you fan out, give each worker its own git worktree/branch (Claude Code can spawn a subagent with isolation: "worktree"), let each commit behind its own gate, and have the orchestrator merge the vetted branches. Sequential workers sidestep this entirely — the tree only ever holds one task's changes.
+The end-of-run Stop judge stays as a final backstop, but it's now confirming an already-vetted history rather than being the first line of defense.
+Open-ended goals: discovery + outcome gate
+Everything above assumes an enumerable list — you know the 150 tasks and put them in PROGRESS.md upfront. A goal like "close this coverage gap, which takes about ten items" is a different shape: the item list doesn't exist yet, the count is an output of research, not an input, and "done" is the gap being closed, not a checklist being finished. Run the fixed-list machinery at it unchanged and it will faithfully execute whatever items the research happened to produce and then declare victory on the checklist — even if the research missed half the gap. Two additions fix that.
+1. Make discovery an explicit, gated phase. Add a phase-zero worker whose job is to research the gap and emit a candidate item list, each item tagged with the specific sub-gap it closes and how "done" for that item will be verified. Then gate the plan before any execution starts: does the union of items actually span the gap (no obvious holes), are they non-overlapping, is each one concrete and checkable? This is the same pre-commit-gate idea, moved up to the planning level — because the decomposition is the root decision, and a wrong item list taints the entire run downstream. It is also the cheapest, highest-leverage place to keep yourself in the loop: eyeballing ~10 proposed items takes a minute and catches a doomed plan before any work is spent on it.
+2. Define "done" as the measured gap, not the boxes checked. The Stop judge's DONE_CRITERIA.md must assert the outcome — run the coverage tool and confirm the metric hit target, or the specific cases that were uncovered now pass — not "all ten items complete." This is the whole game. If the items are done but the metric hasn't moved to target, the judge returns {"ok": false, "reason": "gap still open in region X; research additional items"}, which sends the run back for another discovery increment on the uncovered part. Progress resets the block cap, so a few increments are fine; a gap that genuinely can't be closed automatically hits the cap and stops with a warning, which is the correct outcome — it surfaces "I couldn't finish this" instead of pretending.
+The orchestrator prompt gains one branch to support this: when the outcome gate reports the gap still open, dispatch the researcher again for the named region, execute the new items, and re-measure — loop until the metric is met or the cap trips.
+The trap this structure exists to prevent: all ten items done, gap still open, run reports success. A judge grading the checklist passes it. A judge grading the measured gap catches it. That difference is exactly "ran the list to its end" versus "ran the problem to its solution."
+When it runs clean vs. when to stay in the loop. If the gap is objectively measurable — a coverage percentage, a concrete set of cases that must pass — the outcome gate is a hard backstop and the whole thing can run mostly unattended. If "closed" is a judgment call with no clean metric, the outcome gate is weaker, so lean on the decomposition gate and keep a human checkpoint at the plan step; approving the item list is where your review buys the most.
