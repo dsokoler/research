@@ -1,0 +1,234 @@
+// ============================================================================
+// taint_trees.dl  —  provenance taint, whole-tree vuln classification,
+//                     multi-tree convergence & race candidates  (Soufflé)
+// ============================================================================
+//
+// Run:  souffle -F facts/ -D out/ taint_trees.dl
+//   -F facts/  : directory of <relation>.facts TSVs emitted by the extractor
+//   -D out/    : directory where .output relations are written
+//
+// Two layers:
+//   EDB (facts, below as .input)      — emitted by the Ghidra extractor
+//   POLICY (facts, inline near bottom)— edit freely, no re-extract / no recompile
+//   IDB (rules)                       — the analysis itself
+//
+// The key property vs. a boolean reachability query: `tainted` carries the
+// SOURCE identity, so the full provenance relation taintedBy(node, source) is
+// materialised. Convergence and race detection are then set queries over it.
+// ============================================================================
+
+// ---- types -----------------------------------------------------------------
+.type Vn   <: number        // varnode id (unique within a function's SSA)
+.type Fn   <: number        // function id
+.type Op   <: number        // pcode-op id
+.type Cs   <: number        // call-site id
+.type Src  <: symbol        // source-tree id, e.g. "recv@0x401000#buf"
+.type Cell <: symbol        // resolved memory cell: "stack:-0x18@12" / "global:0x1400030a0"
+.type Ctx  <: symbol        // execution-context kind: "ioctl" / "thread" / "dpc" / "export"
+
+// ============================================================================
+// EDB — facts from the extractor  (facts/<name>.facts, tab-separated)
+// ============================================================================
+.decl varnode(vn:Vn, fn:Fn, space:symbol, size:number)
+.input varnode
+
+// intra-procedural SSA edge: input varnode `src` at slot `slot` of op -> output `dst`
+.decl def_use(fn:Fn, src:Vn, dst:Vn, opcode:symbol, slot:number)
+.input def_use
+
+// EVERY op-consumes-varnode relation (incl. output-less ops: STORE/CBRANCH/CALL).
+// Convention: for a CALL argument, `opcode` is the CALLEE NAME ("memcpy") and
+// `slot` is the arg index, so vuln_pattern/sanitizer rules can match by name.
+// For ordinary ops, `opcode` is the p-code mnemonic.
+.decl consumes(op:Op, fn:Fn, vn:Vn, opcode:symbol, slot:number)
+.input consumes
+
+.decl call_site(cs:Cs, caller:Fn, callee:Fn, indirect:number, target:Vn)
+.input call_site
+.decl call_ret(cs:Cs, recv:Vn)                 // varnode receiving the return value
+.input call_ret
+.decl call_arg(cs:Cs, idx:number, actual:Vn)
+.input call_arg
+.decl formal_param(callee:Fn, idx:number, param:Vn)
+.input formal_param
+.decl ret_val(callee:Fn, val:Vn)               // varnodes flowing into a RETURN op
+.input ret_val
+
+.decl mem_store(op:Op, fn:Fn, addr:Vn, val:Vn, cell:Cell)
+.input mem_store
+.decl mem_load(op:Op, fn:Fn, addr:Vn, val:Vn, cell:Cell)
+.input mem_load
+.decl branch_cond(op:Op, fn:Fn, cond:Vn)       // CBRANCH condition varnode
+.input branch_cond
+
+.decl calls(caller:Fn, callee:Fn)              // static call-graph edge
+.input calls
+
+// ============================================================================
+// POLICY — edit these (shown inline as defaults; move to facts/ if preferred)
+// ============================================================================
+
+// which (opcode, slot) carries taint value->output.  slot = -1 means "any slot".
+.decl propagates(opcode:symbol, slot:number)
+propagates("COPY",-1).      propagates("CAST",-1).     propagates("INT_ZEXT",-1).
+propagates("INT_SEXT",-1).  propagates("INT_ADD",-1).  propagates("INT_SUB",-1).
+propagates("INT_MULT",-1).  propagates("INT_AND",-1).  propagates("INT_OR",-1).
+propagates("INT_XOR",-1).   propagates("INT_LEFT",-1). propagates("INT_RIGHT",-1).
+propagates("INT_SRIGHT",-1).propagates("SUBPIECE",0).  propagates("PIECE",-1).
+propagates("MULTIEQUAL",-1).propagates("INDIRECT",0).  propagates("PTRADD",-1).
+propagates("PTRSUB",-1).    propagates("INT_2COMP",-1).propagates("INT_NEGATE",-1).
+// pointer/value-at-address flow OFF by default (flip on for pointer-taint policy):
+// propagates("LOAD",1). propagates("STORE",1).
+
+// vulnerable USE categories, keyed on (opcode-or-callee, operand slot).
+// slot = -1 : any operand.  This is the whole-tree classification catalog.
+.decl vuln_pattern(opcode:symbol, slot:number, category:symbol, severity:symbol)
+//   memory-safety: tainted value as address / index
+vuln_pattern("LOAD",   1, "oob_read",      "high").
+vuln_pattern("STORE",  1, "oob_write",     "high").
+vuln_pattern("PTRADD",-1, "ptr_arith",     "medium").
+vuln_pattern("PTRSUB",-1, "ptr_arith",     "medium").
+//   arithmetic hazards
+vuln_pattern("INT_DIV",  1, "div_by_zero", "medium").
+vuln_pattern("INT_SDIV", 1, "div_by_zero", "medium").
+vuln_pattern("INT_REM",  1, "div_by_zero", "medium").
+vuln_pattern("INT_SREM", 1, "div_by_zero", "medium").
+vuln_pattern("INT_LEFT", 1, "shift_ub",    "low").
+vuln_pattern("INT_RIGHT",1, "shift_ub",    "low").
+//   control-flow integrity
+vuln_pattern("CALLIND",  0, "indirect_call_target", "critical").
+vuln_pattern("BRANCHIND",0, "indirect_branch",      "critical").
+//   dangerous library calls (opcode = callee name; slot = arg index)
+vuln_pattern("memcpy", 2, "copy_size",   "high").
+vuln_pattern("memmove",2, "copy_size",   "high").
+vuln_pattern("strcpy", 1, "unbounded_copy","high").
+vuln_pattern("malloc", 0, "alloc_size",  "medium").
+vuln_pattern("sprintf",1, "format_arg",  "high").
+vuln_pattern("system", 0, "command_injection","critical").
+vuln_pattern("free",   0, "free_ptr",    "high").
+
+// memory cells trusted for value-flow (the precision/soundness knob). The
+// extractor emits one row per stack/global cell it resolved. LOAD/STORE through
+// an UNresolved pointer is intentionally NOT connected here (default = precise).
+.decl resolved_cell(cell:Cell)
+.input resolved_cell
+.decl global_cell(cell:Cell)                   // resolved cells that are globals
+.input global_cell
+
+// source seeds and sanitizer cuts: produced by applying source/sanitizer rules
+// to the graph (reuse the Python rule-matcher) and emitted as facts.
+.decl source_seed(s:Src, vn:Vn, label:symbol)
+.input source_seed
+.decl sanitizes(vn:Vn, s:Src)                  // s = "*" cuts every source
+.input sanitizes
+
+// entrypoint -> execution context. Seeded by the extractor's heuristics
+// (export table, thread-start / DPC / IOCTL registration patterns) and editable.
+.decl context_root(fn:Fn, ctx:Ctx)
+.input context_root
+
+// ============================================================================
+// IDB — the analysis
+// ============================================================================
+
+// ---- provenance closure: taintedBy(node, source) ---------------------------
+.decl tainted(vn:Vn, s:Src)
+.output tainted
+
+tainted(vn, s) :- source_seed(s, vn, _).
+
+// intra-procedural flow
+tainted(dst, s) :-
+    tainted(src, s),
+    def_use(_, src, dst, oc, sl),
+    ( propagates(oc, sl) ; propagates(oc, -1) ),
+    !sanitizes(dst, s), !sanitizes(dst, "*").
+
+// interprocedural CALL: actual arg -> callee formal param (context-insensitive)
+tainted(param, s) :-
+    tainted(actual, s),
+    call_site(cs, _, callee, _, _),
+    call_arg(cs, idx, actual),
+    formal_param(callee, idx, param),
+    !sanitizes(param, s), !sanitizes(param, "*").
+
+// interprocedural RETURN: callee return -> THIS call-site's receiver
+// (call-site matched -> no "returns to every caller" false paths)
+tainted(recv, s) :-
+    tainted(val, s),
+    call_site(cs, _, callee, _, _),
+    call_ret(cs, recv),
+    ret_val(callee, val),
+    !sanitizes(recv, s), !sanitizes(recv, "*").
+
+// memory value-flow through RESOLVED cells only (precise model)
+tainted(lval, s) :-
+    tainted(sval, s),
+    mem_store(_, _, _, sval, cell),
+    resolved_cell(cell),
+    mem_load(_, _, _, lval, cell),
+    !sanitizes(lval, s), !sanitizes(lval, "*").
+
+// ---- whole-tree classification: every tainted value, every dangerous use ---
+.decl vuln_use(vn:Vn, op:Op, fn:Fn, category:symbol, severity:symbol, s:Src)
+.output vuln_use
+vuln_use(vn, op, fn, cat, sev, s) :-
+    tainted(vn, s),
+    consumes(op, fn, vn, oc, sl),
+    ( vuln_pattern(oc, sl, cat, sev) ; vuln_pattern(oc, -1, cat, sev) ).
+
+// ---- multi-tree convergence ------------------------------------------------
+.decl convergent(vn:Vn)
+.output convergent
+convergent(vn) :- tainted(vn, s1), tainted(vn, s2), ord(s1) < ord(s2).
+
+// a dangerous use of a value that >1 source tree controls
+.decl convergent_vuln(vn:Vn, op:Op, category:symbol, severity:symbol, s1:Src, s2:Src)
+.output convergent_vuln
+convergent_vuln(vn, op, cat, sev, s1, s2) :-
+    vuln_use(vn, op, _, cat, sev, s1),
+    tainted(vn, s2), ord(s1) < ord(s2).
+
+// ---- source -> execution context (via call-graph reachability from a root) --
+.decl reaches_fn(root:Fn, fn:Fn)
+reaches_fn(f, f)   :- context_root(f, _).
+reaches_fn(r, g)   :- reaches_fn(r, f), calls(f, g).
+
+.decl source_fn(s:Src, fn:Fn)
+source_fn(s, fn)   :- source_seed(s, vn, _), varnode(vn, fn, _, _).
+
+.decl source_ctx(s:Src, ctx:Ctx)
+source_ctx(s, ctx) :- source_fn(s, fn), reaches_fn(root, fn), context_root(root, ctx).
+
+// ---- race candidates: shared mutable state controlled from >1 context -------
+// a tainted value from context `ctx` touches memory cell (read or write)
+.decl cell_ctx(cell:Cell, ctx:Ctx)
+cell_ctx(cell, ctx) :- mem_store(_, _, _, v, cell), tainted(v, s), source_ctx(s, ctx).
+cell_ctx(cell, ctx) :- mem_load(_, _, _, v, cell),  tainted(v, s), source_ctx(s, ctx).
+
+.decl writes_cell(cell:Cell)
+writes_cell(cell) :- mem_store(_, _, _, _, cell).
+
+// shared = a global that's written, or a cell touched from two contexts
+.decl shared_cell(cell:Cell)
+shared_cell(cell) :- global_cell(cell), writes_cell(cell).
+shared_cell(cell) :- cell_ctx(cell, c1), cell_ctx(cell, c2), c1 != c2.
+
+.decl race_candidate(cell:Cell, ctx1:Ctx, ctx2:Ctx)
+.output race_candidate
+race_candidate(cell, c1, c2) :-
+    shared_cell(cell), writes_cell(cell), resolved_cell(cell),
+    cell_ctx(cell, c1), cell_ctx(cell, c2), ord(c1) < ord(c2).
+
+// ---- TOCTOU heuristic: a cell is check-gated, then re-read into a bad use ----
+.decl checked_cell(cell:Cell, s:Src)
+checked_cell(cell, s) :-
+    mem_load(_, _, _, v, cell), tainted(v, s), branch_cond(_, _, v).
+
+.decl toctou_candidate(cell:Cell, op:Op, category:symbol, s:Src)
+.output toctou_candidate
+toctou_candidate(cell, op, cat, s) :-
+    checked_cell(cell, s),
+    mem_load(_, _, _, v2, cell),
+    vuln_use(v2, op, _, cat, _, s),
+    resolved_cell(cell).
