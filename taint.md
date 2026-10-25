@@ -684,7 +684,7 @@ set and, where a missing guard is identified, into new sanitizer models.
 
 ## 11. Implementation plan
 
-Build order, on a CTADL fork:
+Build order, on a CTADL fork. **Prerequisites: Appendix C.**
 
 0. **Stand up CTADL** — license (Apache-2.0) and schema are confirmed; verify
    flow-sensitivity behavior empirically and that the Ghidra fact-generator
@@ -780,6 +780,56 @@ CTADL's schema — §5.3).
   reachability, SARIF.
 - Source/context models, callback resolver, symbolic confirmer, triage store,
   DuckDB layer, validation harness — *to build* (§11).
+
+## Appendix C — Software dependencies (build & run)
+
+Grouped by role. ⚠ marks version-critical or easy-to-miss items.
+
+**Host**
+- **Linux** (or **WSL2** on Windows) — Soufflé and CTADL do not run natively on
+  Windows. Analyzing Windows drivers is static, so no Windows host is needed to
+  *analyze*; Windows is only needed to *build* test drivers or run dynamic
+  oracles.
+- **Git**, and a Python environment manager (**pip** + **venv**, or **uv**).
+
+**Core analysis stack (required)**
+- ⚠ **JDK matching your Ghidra version** (Ghidra 11.4 → **JDK 21**; older 11.x →
+  JDK 17) — Ghidra runs on the JVM.
+- **Ghidra 11.4+** — decompiler, p-code SSA, and headless mode (`analyzeHeadless`).
+  11.3 introduced Datalog fact export; 11.4 aligns with CTADL v0.11.0.
+- **CTADL Ghidra fact-generator plugin** — installed into Ghidra (the extension
+  that emits p-code facts).
+- **CTADL** (original, Soufflé-based — `sandialabs/ctadl`) — the fork base / CLI.
+- **Python 3.9+** — runs the CTADL CLI and our glue tooling.
+- ⚠ **Patched Soufflé 2.3** — the Datalog engine CTADL *and* our `taint_trees.dl`
+  run on. **Not stock Soufflé** — use CTADL's patched build.
+- **C++17 toolchain** (`g++` or `clang++`, `make`, `cmake`) — Soufflé compiles
+  rules to native C++. Building the patched Soufflé from source also needs
+  `bison`, `flex`, `libffi`, `zlib`.
+
+**Our rule layer & result store (required)**
+- **`taint_trees.dl`** (this project) — the Soufflé rule modules.
+- **DuckDB** — CLI and/or the `duckdb` Python package (result/analytics store).
+- *Optional:* **DuckPGQ** extension (graph path queries); **networkx** (CTADL's
+  optional graph-export plugin).
+
+**Tier-3 symbolic confirmation (optional, §3.2)**
+- **angr** (Python package) — feasibility + double-fetch overlap checks on top
+  candidates.
+
+**Validation / benchmarking (as needed, §13)**
+- **HEVD** (`hacksysteam/HackSysExtremeVulnerableDriver`) — ground-truth bugs.
+  Use prebuilt binaries, or build from source (needs the Windows toolchain below).
+- **IOCTLance** (`zeze-zeze/ioctlance`, angr-based) — comparison baseline.
+- **loldrivers** catalog — real vulnerable-driver samples (e.g. RTCore64.sys).
+- *Optional, heavy:* **Bochspwn / Bochspwn Reloaded** — dynamic oracle; requires a
+  Bochs instrumentation build.
+- *Only if building drivers from source:* **Windows** + **Visual Studio** +
+  **Windows Driver Kit (WDK/EWDK)**.
+
+**Roadmap-only (§12)**
+- **Kùzu** — only if adopting the Cypher graph-visualization alternative to DuckDB.
+- **BinDiff** or Ghidra **Version Tracking** — for patch-diff-guided mode.
 
 ## References
 
