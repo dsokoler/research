@@ -550,6 +550,65 @@ the forward-taint model.
 | Uninitialized-memory infoleak | 457 / 200 | **Out** | reverse (kernel→user) flow — future mode (§12) |
 | Type confusion | 843 | **Out** | needs type-state the model doesn't track |
 
+Remedies for the *Partial* and *Out* rows are in §6.8.
+
+### 6.8 Closing the coverage gaps
+
+Most *Partial* / *Out* classes above are not beyond the architecture — they are
+reachable by changing the **polarity** of the same provenance engine, plus two
+foundational upgrades. Only logic flaws and type confusion genuinely resist.
+
+**Two foundational upgrades (help every class):**
+- **Code-pointer points-to** — closes the source-enumeration gap (incomplete
+  sources silently shrink the search space for everything else). A
+  function-pointer points-to analysis in the same fixpoint resolves `CALLIND`
+  targets from where code addresses are stored (`MajorFunction[n]`, WDF queue
+  config, `FLT_REGISTRATION`, vtables), bounded by the address-taken set and
+  type filtering. DOOP-style, Datalog-native — the highest-leverage single
+  addition.
+- **Ordering / dominance layer** — the `branch_cond` + dominance + epoch
+  machinery built for double-fetch (§6.4) is reused by the must-init and
+  lifetime analyses below. Build once, reuse three times.
+
+**Caught by a polarity swap (cheap, high reuse):**
+- **Uninitialized infoleak** (CWE-457/200) — invert the flow: color flows from
+  non-zeroed allocation sites and stack frames *forward* to kernel→user copy-out
+  sinks (`UserBuffer`/`OutputBuffer`), sanitized by `memset`/`RtlZeroMemory`. It
+  is a *must*-analysis ("every byte copied out must be initialized"), so it needs
+  the ordering layer and stratified negation; access paths give the byte/field
+  granularity for partial-struct padding holes. This is the reverse-flow mode
+  (§12), made concrete.
+- **Constant-time / side-channel-lite** (CWE-208) — source = a "secret" color
+  (key material), sink = a branch condition or a memory-access *address* that
+  depends on it. A policy swap over the existing branch/address facts.
+  (Microarchitectural channels — cache, Spectre — stay out: dynamic/uarch
+  territory.)
+
+**Tractable with a new primitive (medium):**
+- **UAF / double-free** (CWE-416/415) — allocation-site typestate: model each
+  abstract object through alloc → use → free as a state machine; UAF = a use
+  reachable after free on the same object, double-free = free-after-free. Quality
+  tracks points-to precision and needs the ordering layer. Candidate-level, as
+  the matrix marks it.
+
+**Genuinely resistant — assist, don't claim to solve:**
+- **Logic / authorization flaws** (CWE-862/863) — policy, not propagation, so
+  byte-tracking cannot find them directly. The handle is **consistency/outlier
+  analysis** (RacerX belief-style): flag the handler that reaches a sensitive
+  operation without the guard (`SeAccessCheck`, a privilege or `PreviousMode`
+  check, handle validation) that its sibling paths apply. Heuristic, and it needs
+  a notion of the expected guard — build it as a "missing-dominating-guard" rule
+  and set expectations accordingly.
+- **Type confusion** (CWE-843) — needs intended-vs-actual type at each use, i.e.
+  type recovery on stripped drivers, which is largely intractable statically.
+  Defer to symbolic/dynamic analysis or a typed build.
+
+Net: the fix is not many new analyses but closing source enumeration
+(code-pointer points-to), building the ordering layer once, and expressing
+infoleak, constant-time, and UAF as alternate source/sink/color policies over the
+existing engine. The residual blind spots shrink to logic flaws and type
+confusion.
+
 ---
 
 ## 7. Precision and accuracy (priority-ordered)
@@ -722,13 +781,16 @@ duckdb target.duckdb < load_and_query.sql
 
 ## 12. Roadmap
 
-- Close the indirect-call / callback gap with a resolved call graph (critical for
-  remote sources and `CALLIND` sinks).
+- Close the indirect-call / callback gap with a resolved call graph and
+  code-pointer points-to (§6.8; critical for remote sources and `CALLIND` sinks).
 - k-limited context sensitivity (§7.4) and deeper access-path tuning.
 - DEADLINE-style symbolic refinement (epoch memory model) on double-fetch
   candidates to cut FPs further (tier 3, §3.2).
 - **Reverse-flow mode** for uninitialized-memory infoleak (kernel→user) — the
-  Bochspwn Reloaded class, the inverse of forward taint (§1.3).
+  Bochspwn Reloaded class, the inverse of forward taint (§1.3, §6.8).
+- **Extended analysis modes** — constant-time / secret-dependence, UAF/double-free
+  typestate, and authorization-outlier detection, each an alternate policy over
+  the same engine (§6.8).
 - **Patch-diff-guided mode** — diff two driver versions (BinDiff / Ghidra
   version tracking) and restrict or prioritize analysis to changed functions for
   1-day hunting.
